@@ -1,0 +1,176 @@
+# Handover — wind station website
+
+Everything a fresh session needs to pick this up cold. No prior context assumed.
+
+---
+
+## 1. What this is
+
+A static, public, live-first web page that displays wind speed and direction
+from an instrument on a moored vessel near İzmir, Türkiye. The device writes one
+CSV per day into a public Google Drive folder, updating roughly every 30 seconds
+while powered on. The page reads those files directly from the browser.
+
+The site is built and tested. It runs today in demo mode against bundled sample
+data. It is not yet deployed and has never run against the live Drive folder,
+because no API key has been created.
+
+**Drive folder:** `12Sn5_2YPEmH2ZzxTXy9Fcy8M6MZGi8Qr` (named `Wind_data`)
+
+---
+
+## 2. Decisions already made
+
+These were settled with the user across the design conversation. Treat them as
+fixed unless the user reopens them.
+
+| Decision | Choice | Why it matters |
+|---|---|---|
+| Audience | Public — anyone with the link | Needs plain-language readouts, no jargon-only display |
+| Priority | Live conditions now; history secondary | Default view is today; past days are lazy-loaded on demand |
+| Infrastructure | Static hosting only, no backend | Forces browser-side Drive reads; rules out precomputed rollups |
+| Direction reference | **Magnetic**, uncorrected | The log emits `306° M`. No WMM conversion. Labelled `M` everywhere |
+| Position | Fixed marker, footer only | Vessel is moored (~13 m of drift). No map, no live position broadcast |
+| Columns used | Date, Time, TWS, TWD | SOG/COG/TWA dropped from display, kept in the CSV download |
+| Charting | Chart.js 4 from CDN | Only external dependency |
+
+**Deliberately not built:** a map; multi-day aggregation (needs precomputation a
+static site can't do); `Range` requests for the growing file tail.
+
+---
+
+## 3. Current state
+
+```
+wind-station/
+  index.html                    page structure
+  app.css                       theme, light + dark
+  app.js                        state, polling, rendering, charts
+  config.js                     THE ONLY FILE THE USER EDITS TO GO LIVE
+  lib/parser.js                 CSV → rows
+  lib/stats.js                  time windows, circular means, Beaufort, units
+  lib/drive.js                  Drive REST client
+  lib/rose.js                   wind rose SVG
+  sample/SsLog-19-08-2026.csv   REAL log from the device (211 rows, 105 min)
+  sample/SsLog-18-08-2026.csv   SYNTHETIC stress day (1922 rows, generated)
+  test/parser.test.mjs          16 assertions
+  test/stress.test.mjs          6 assertions
+  test/dom-smoke.mjs            34 assertions, jsdom + stubbed Chart.js
+  test/make-stress-fixture.py   regenerates the synthetic day
+  README.md                     setup and deployment
+```
+
+Verification status, all passing as of handover:
+
+```bash
+node --test 'test/*.test.mjs'          # 22 tests
+npm install --no-save jsdom
+node test/dom-smoke.mjs                # 34 assertions
+python3 -m http.server 8080            # visual check, demo mode
+```
+
+The DOM smoke test boots the real `index.html` under jsdom with `window.Chart`
+stubbed, because the CDN was unreachable in the original build sandbox. **The
+charts have therefore never been rendered by real Chart.js.** First task in a
+networked environment: load the page in a browser and confirm both charts draw.
+
+---
+
+## 4. Log format — the things that break naive parsers
+
+All of these were found by inspecting a real file and are covered by tests.
+Do not "simplify" the parser without re-reading this list.
+
+| Trait | Example | Handling |
+|---|---|---|
+| Encoding is windows-1252 | `°` is one 0xB0 byte | `TextDecoder('windows-1252')` on an ArrayBuffer. `res.text()` assumes UTF-8 and mangles every degree sign |
+| Header repeats mid-file | at lines 1, 2, 5 | Skip *any* line starting `'Date` — one is written per device session |
+| Column names have a leading apostrophe | `'Date, 'Time,` | Cosmetic, but don't match on `Date` alone |
+| No-data sentinel | `- - - - -` | → `null`, never `0`. Seen in SOG/COG on GPS dropout (13 of 211 rows) |
+| Dates are `dd/mm/yyyy` | `19/08/2026` | Parse explicitly. `new Date("08/09/2026")` is 8 Sept or 9 Aug depending on locale |
+| Times carry `UTC` | `10:18:02 UTC` | Parse as UTC; display in `Europe/Istanbul` |
+| Positions are deg + decimal minutes | `38° 19.080' N` | → `deg + min/60`, negate for S/W |
+| Bearings are magnetic | `306° M` | Integer degrees; the `M` is meaningful |
+| Sampling is irregular | 17–33 s, mostly 28–32 | **Every rolling stat must use a time window, never a row count** |
+| Trailing comma | 11 fields, last always empty | Comment column is always empty in observed data |
+
+Fixture facts for the real file (`SsLog-19-08-2026.csv`): 211 data rows,
+3 header lines skipped, 1 blank, 13 sentinel rows, span 10:18:02–12:03:01 UTC,
+TWS 7.3–11.2 kn, TWD 296°–339° M, station at 38.3180° N 26.6950° E.
+A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
+
+---
+
+## 5. Design invariants — do not break these
+
+1. **Direction is never a line chart.** 359° → 002° is a 3° shift; a line draws
+   it as a full-scale cliff. Samples are plotted as points on a 0–360 axis.
+   Aggregation goes to the wind rose.
+2. **Circular means use unit vectors.** Arithmetic mean of 350° and 010° is
+   180° — exactly backwards. See `vectorMeanDeg` in `lib/stats.js`.
+3. **"Max", not "gust".** At 30 s sampling these are instantaneous samples, not
+   the 3-second peak "gust" means meteorologically. The footer says so.
+4. **The dial smooths, the chart does not.** Hero shows a 5-minute vector mean
+   of direction; the chart plots every sample. On the real fixture these read
+   334° and 327° respectively. This divergence is disclosed in the footer —
+   if you change the smoothing, update that text.
+5. **Offline is a first-class state.** Over 15 min stale → dial greys out, pill
+   reads "offline since HH:MM". A confident reading from yesterday is worse
+   than no reading. States: live (<2 min), delayed (2–15 min), offline (>15 min),
+   no-data, fetch-error.
+6. **Must use `www.googleapis.com`.** It sends CORS headers.
+   `drive.google.com/uc?export=download` does not and fails silently from a page.
+7. **Sort Drive files by `modifiedTime`, never filename.** Survives midnight
+   rollover, re-uploads and backfilled days.
+
+---
+
+## 6. Next tasks, in order
+
+1. **Render check with real Chart.js.** Serve the folder, open in a browser,
+   confirm both charts draw, the crosshair syncs between them, and the rose
+   renders in both light and dark mode. This is the one thing the test suite
+   cannot prove.
+2. **Go live.** Create a browser API key (Drive API only + HTTP-referrer
+   restriction), fill `config.js`, deploy to Cloudflare Pages / Netlify /
+   GitHub Pages. Then confirm against the real folder: does `files.list` return
+   what's expected, does the poll loop pick up a mid-day update?
+3. **`Range` requests for the file tail.** Once a day's file is parsed, request
+   only bytes past the last known offset and append, instead of re-downloading
+   ~290 KB on every change. Drive's `alt=media` honours `Range`.
+   Acceptance: a tab open for an hour transfers far less than 60 × file size.
+4. **Mobile pass on a real phone in sunlight.** The layout is mobile-first but
+   has only been checked at desktop widths.
+5. **Long-run soak.** Leave it open across a device power-cycle and confirm the
+   live → delayed → offline → live transitions all fire.
+
+---
+
+## 7. Open questions for the user
+
+- **TWS units are assumed knots.** Not stated anywhere in the file. Confirm
+  against the device manual — everything downstream (Beaufort bands, the rose's
+  speed bins, the unit converter) depends on it.
+- **Does the device log true gusts** in another mode? If so, prefer that over
+  the 30-second maximum.
+- **Station display name** and place label for `config.js` (currently generic).
+- **Domain**, needed for the API-key referrer restriction.
+
+---
+
+## 8. Seed prompt for the new session
+
+Paste this, and attach or point at the project folder:
+
+> I'm continuing work on a static website that displays wind data from a
+> Google Drive folder of daily CSVs. The project is complete and tested —
+> read `HANDOVER.md` first, then `README.md`. It covers the locked design
+> decisions, the log-format gotchas, and the invariants I don't want broken.
+>
+> Current state: 22 unit tests and 34 DOM assertions pass, but the charts have
+> never been rendered by real Chart.js because the build sandbox had no CDN
+> access. Start with task 1 in the handover — a render check in a real browser
+> — then we'll move on to `Range` requests for the file tail.
+
+If the new session has no filesystem access, the files it most needs pasted are
+`lib/parser.js`, `lib/stats.js` and `app.js`, in that order.

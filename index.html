@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Wind station</title>
+<meta name="description" content="Live wind speed and direction from a moored weather station.">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="banner" class="banner" hidden></div>
+
+<header class="masthead">
+  <div>
+    <h1 id="station-name">Wind station</h1>
+    <p id="place-name" class="place"></p>
+  </div>
+  <span id="status-pill" class="pill pill-loading">
+    <span class="dot" aria-hidden="true"></span>
+    <span id="status-text">Loading</span>
+  </span>
+</header>
+
+<main>
+
+  <section class="hero" aria-labelledby="now-heading">
+    <h2 id="now-heading" class="sr-only">Current conditions</h2>
+
+    <div class="dial-wrap">
+      <svg id="dial" viewBox="0 0 200 200" role="img" aria-labelledby="dial-label">
+        <title id="dial-label">Compass dial showing current wind direction and speed</title>
+        <circle class="dial-face" cx="100" cy="100" r="92"/>
+        <circle class="dial-inner" cx="100" cy="100" r="74"/>
+        <g class="dial-ticks" id="dial-ticks"></g>
+        <text class="dial-rose" x="100" y="20" text-anchor="middle">N</text>
+        <text class="dial-rose" x="186" y="105" text-anchor="middle">E</text>
+        <text class="dial-rose" x="100" y="192" text-anchor="middle">S</text>
+        <text class="dial-rose" x="14" y="105" text-anchor="middle">W</text>
+        <g id="needle" transform="rotate(0 100 100)">
+          <path class="needle-shape" d="M100 22 L108 60 L100 52 L92 60 Z"/>
+          <line class="needle-stem" x1="100" y1="52" x2="100" y2="86"/>
+        </g>
+        <circle class="dial-hub" cx="100" cy="100" r="4"/>
+        <text id="dial-speed" class="dial-speed" x="100" y="112" text-anchor="middle">--</text>
+        <text id="dial-unit" class="dial-unit" x="100" y="132" text-anchor="middle">kn</text>
+      </svg>
+    </div>
+
+    <div class="readout">
+      <p id="direction-line" class="direction">--</p>
+      <p id="beaufort-line" class="beaufort">Waiting for data</p>
+      <p id="updated-line" class="updated"></p>
+    </div>
+  </section>
+
+  <section class="tiles" aria-label="Recent statistics">
+    <div class="tile">
+      <p class="tile-label">Max, last hour</p>
+      <p class="tile-value" id="stat-max">--</p>
+    </div>
+    <div class="tile">
+      <p class="tile-label">Mean, last hour</p>
+      <p class="tile-value" id="stat-mean">--</p>
+    </div>
+    <div class="tile">
+      <p class="tile-label">Trend, 10 min</p>
+      <p class="tile-value" id="stat-trend">--</p>
+    </div>
+    <div class="tile">
+      <p class="tile-label">Shift, 30 min</p>
+      <p class="tile-value" id="stat-shift">--</p>
+    </div>
+  </section>
+
+  <section class="controls" aria-label="Display options">
+    <label class="field">
+      <span class="field-label">Day</span>
+      <select id="day-select"><option value="">Latest</option></select>
+    </label>
+    <label class="field">
+      <span class="field-label">Units</span>
+      <select id="unit-select">
+        <option value="kn">knots</option>
+        <option value="ms">m/s</option>
+        <option value="kmh">km/h</option>
+      </select>
+    </label>
+    <button id="download" type="button" class="btn">Download CSV</button>
+    <button id="back-to-live" type="button" class="btn btn-quiet" hidden>Back to live</button>
+  </section>
+
+  <section class="panel" aria-labelledby="speed-heading">
+    <h2 id="speed-heading">Wind speed</h2>
+    <div class="chart-box chart-speed">
+      <canvas id="chart-tws" role="img"
+        aria-label="Line chart of wind speed over the selected day."></canvas>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="dir-heading">
+    <h2 id="dir-heading">Wind direction <span class="mag-tag">magnetic</span></h2>
+    <div class="chart-box chart-dir">
+      <canvas id="chart-twd" role="img"
+        aria-label="Scatter plot of wind direction over the selected day, 0 to 360 degrees."></canvas>
+    </div>
+    <p class="note">Plotted as points, not a line — a shift from 359&deg; to 002&deg; is 3&deg;,
+      but a line would draw it as a full-scale drop.</p>
+  </section>
+
+  <section class="panel" aria-labelledby="rose-heading">
+    <h2 id="rose-heading">Wind rose</h2>
+    <div id="rose-legend" class="legend"></div>
+    <div id="rose" class="rose-box"></div>
+    <p class="note">Share of samples arriving from each direction, stacked by speed band.</p>
+  </section>
+
+</main>
+
+<footer>
+  <p><strong>All directions are magnetic</strong>, exactly as logged by the instrument.
+    They are not corrected to true north.</p>
+  <p id="footer-meta"></p>
+  <p class="footer-caveat">&ldquo;Max&rdquo; is the highest 30-second sample in the window,
+    not a meteorological 3-second gust. The dial shows a 5-minute vector mean of direction
+    to damp jitter; the direction chart plots every individual sample.</p>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
