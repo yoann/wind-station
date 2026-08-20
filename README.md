@@ -103,6 +103,12 @@ The parser handles these, all observed in real files:
 - **Offline is a first-class state.** Over 15 minutes stale, the dial greys out
   and the pill reads "offline since HH:MM". A confident-looking reading from
   yesterday is worse than no reading.
+- **Rows logged under way are excluded.** The instrument sits on a race
+  committee vessel, so anything recorded above `maxSogKnots` (2 kn over ground)
+  is a boat-motion reading from somewhere other than the mooring. Those rows
+  never reach the tiles, charts, rose or station marker; the footer says how
+  many were dropped, and the CSV download still serves the untouched file. A
+  missing SOG is kept — that sentinel means a GPS dropout, not motion.
 
 ## Tests
 
@@ -110,7 +116,7 @@ The parser handles these, all observed in real files:
 npm test
 ```
 
-38 assertions over the parser, the statistics, the axis scales and the wind
+41 assertions over the parser, the statistics, the axis scales and the wind
 rose, with fixtures taken from a real log: 211 rows, 3 header blocks,
 13 sentinel rows, TWS 7.3–11.2, TWD 296–339 M.
 

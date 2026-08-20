@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { parseLogBytes, parseTimestamp, parseDegMin, parseBearing, parseNumber, dateFromFilename } from '../lib/parser.js';
-import { vectorMeanDeg, circularDiff, beaufort, cardinal16, summarise, windowRows, formatSpeed } from '../lib/stats.js';
+import { vectorMeanDeg, circularDiff, beaufort, cardinal16, summarise, windowRows, formatSpeed, mooredRows } from '../lib/stats.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bytes = readFileSync(join(here, '..', 'sample', 'SsLog-19-08-2026.csv'));
@@ -124,4 +124,34 @@ test('filename date is dd-mm-yyyy', () => {
 test('empty and header-only input does not throw', () => {
   assert.equal(parseLogBytes(Buffer.from('')).rows.length, 0);
   assert.equal(parseLogBytes(Buffer.from("'Date, 'Time, 'TWS,\r\n")).rows.length, 0);
+});
+
+test('mooredRows drops rows logged under way, keeps unknown SOG', () => {
+  const sample = [
+    { sog: 0.2 }, { sog: 2 }, { sog: 2.1 }, { sog: 11.4 }, { sog: null },
+  ];
+  const kept = mooredRows(sample, 2);
+  // The threshold is a ceiling, not a cut: exactly 2.0 kn is still stationary.
+  assert.deepEqual(kept.map((r) => r.sog), [0.2, 2, null]);
+});
+
+test('mooredRows leaves the moored fixture untouched', () => {
+  // Every SOG in the real file is <= 0.4 kn — the boat never moved.
+  assert.equal(mooredRows(rows, 2).length, 211);
+});
+
+test('mooredRows over a parsed under-way log', () => {
+  // Neither sample file contains motion, so the filter is exercised here.
+  const log = [
+    "'Date, 'Time, 'Latitude, 'Longitude, 'SOG, 'COG, 'TWS, 'TWA, 'TWD, 'Comment, ",
+    "19/08/2026, 10:00:00 UTC, 38\xB0 19.080' N, 026\xB0 41.698' E, 00.1, 355\xB0 M, 08.4, 026\xB0 Port, 306\xB0 M, , ",
+    "19/08/2026, 10:00:30 UTC, 38\xB0 19.200' N, 026\xB0 41.900' E, 06.2, 090\xB0 M, 14.1, 040\xB0 Stbd, 100\xB0 M, , ",
+    "19/08/2026, 10:01:00 UTC, 38\xB0 19.400' N, 026\xB0 42.100' E, 03.4, 090\xB0 M, 12.7, 040\xB0 Stbd, 110\xB0 M, , ",
+    "19/08/2026, 10:01:30 UTC, 38\xB0 19.080' N, 026\xB0 41.698' E, - - - - -, - - - - -, 08.6, 026\xB0 Port, 308\xB0 M, , ",
+  ].join('\r\n');
+  const parsed = parseLogBytes(Buffer.from(log, 'latin1'));
+  assert.equal(parsed.rows.length, 4);
+  const kept = mooredRows(parsed.rows, 2);
+  assert.equal(kept.length, 2);
+  assert.deepEqual(kept.map((r) => r.tws), [8.4, 8.6]);
 });

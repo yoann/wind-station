@@ -32,6 +32,7 @@ fixed unless the user reopens them.
 | Direction reference | **Magnetic**, uncorrected | The log emits `306° M`. No WMM conversion. Labelled `M` everywhere |
 | Position | Fixed marker, footer only | Vessel is moored (~13 m of drift). No map, no live position broadcast |
 | Columns used | Date, Time, TWS, TWD | SOG/COG/TWA dropped from display, kept in the CSV download |
+| Under-way rows | Excluded above `CONFIG.maxSogKnots` (2 kn) | The boat is a race committee vessel; rows logged while it moves are boat-motion readings from elsewhere. Null SOG is kept |
 | Charting | Chart.js 4, bundled | Was a CDN script; now tree-shaken into the build, no runtime third party |
 | Build | Vite, output to `dist/` | One JS + one CSS request instead of 8 files plus a CDN hit |
 | Deployment | GitHub Actions → Pages | Publishes `dist/` only, so the repo root is not served |
@@ -61,9 +62,9 @@ wind-station/
   lib/rose.js                   wind rose SVG
   sample/SsLog-19-08-2026.csv   REAL log from the device (211 rows, 105 min)
   sample/SsLog-18-08-2026.csv   SYNTHETIC stress day (1922 rows, generated)
-  test/parser.test.mjs          16 assertions
+  test/parser.test.mjs          19 assertions
   test/stress.test.mjs          6 assertions
-  test/dom-smoke.mjs            34 assertions, jsdom + stubbed Chart.js/Drive
+  test/dom-smoke.mjs            35 assertions, jsdom + stubbed Chart.js/Drive
   test/make-stress-fixture.py   regenerates the synthetic day
   README.md                     setup and deployment
 ```
@@ -72,8 +73,8 @@ Verification status, all passing as of handover:
 
 ```bash
 npm install
-npm test                               # 38 assertions
-npm run test:dom                       # 34 assertions
+npm test                               # 41 assertions
+npm run test:dom                       # 35 assertions
 npm run build && npm run preview       # visual check of the real bundle
 ```
 
@@ -144,6 +145,13 @@ A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
    `drive.google.com/uc?export=download` does not and fails silently from a page.
 7. **Sort Drive files by `modifiedTime`, never filename.** Survives midnight
    rollover, re-uploads and backfilled days.
+8. **Only stationary rows reach the display.** `ingest` in `app.js` passes every
+   parsed row through `mooredRows` (`lib/stats.js`) before anything else sees it,
+   so the tiles, charts, rose and station marker are all built from readings
+   taken at the mooring. A missing SOG is kept — the sentinel means a GPS
+   dropout, not motion. The threshold is `CONFIG.maxSogKnots`; the CSV download
+   still serves the untouched file. Filter here and nowhere else: the parser
+   stays a pure CSV reader, and the footer discloses the count it dropped.
 
 ---
 

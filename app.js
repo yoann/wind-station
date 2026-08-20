@@ -2,7 +2,7 @@ import { CONFIG } from './config.js';
 import { parseLog, decodeLog, dateFromFilename } from './lib/parser.js';
 import {
   summarise, freshness, formatAge, formatSpeed, UNITS, cardinal16, MINUTE, SUMMARY_MINUTES,
-  min, max, windowRows, vectorMeanDeg,
+  min, max, windowRows, vectorMeanDeg, mooredRows,
 } from './lib/stats.js';
 import { paddedRange, directionRange, unwrapDeg, foldInto, normDeg } from './lib/scale.js';
 import { fetchLatestMeta, listFiles, fetchFileBytes, describeError } from './lib/drive.js';
@@ -23,11 +23,17 @@ const SPEED_MIN_SPAN_KN = 5;
 const DIR_MIN_SPAN_DEG = 60;
 const DIR_CENTRE_MINUTES = 15;
 
+// Shown instead of "no data" when the file held readings but every one of them
+// was logged while the boat was moving — a real state, not an outage.
+const UNDER_WAY = 'Vessel under way \u2014 no station readings';
+const underWayOnly = () => !state.rows.length && state.excluded > 0;
+
 const state = {
   unit: CONFIG.defaultUnit,
   rows: [],
   rawText: '',
   fileMeta: null,       // { id, name, modifiedTime }
+  excluded: 0,          // rows dropped because the vessel was under way
   viewingDay: '',       // '' = follow latest, otherwise a file id
   error: null,
   backoff: 0,
@@ -177,8 +183,12 @@ async function load({ force = false } = {}) {
 function ingest(bytes, meta) {
   state.rawText = decodeLog(bytes);
   const { rows, station } = parseLog(state.rawText);
-  state.rows = rows;
-  state.station = station;
+  state.rows = mooredRows(rows, CONFIG.maxSogKnots);
+  state.excluded = rows.length - state.rows.length;
+  // The marker has to come from a stationary row too: a file that opens
+  // mid-passage would otherwise pin the footer to wherever the boat was moving.
+  const fixed = state.rows.find((r) => r.lat !== null && r.lon !== null);
+  state.station = fixed ? { lat: fixed.lat, lon: fixed.lon } : station;
   state.fileMeta = meta;
 }
 
@@ -242,7 +252,9 @@ function renderHero(s) {
     el('direction-line').textContent = '--';
     el('beaufort-line').textContent = state.error
       ? 'Data unavailable'
-      : 'No readings yet today';
+      : underWayOnly()
+        ? UNDER_WAY
+        : 'No readings yet today';
     el('updated-line').textContent = '';
     dial.classList.add('stale');
     return;
@@ -297,7 +309,7 @@ function renderFreshness() {
   }
   if (!state.rows.length) {
     pill.classList.add('pill-loading');
-    text.textContent = 'No data';
+    text.textContent = underWayOnly() ? UNDER_WAY : 'No data';
     return;
   }
   if (state.viewingDay) {
@@ -327,6 +339,7 @@ function renderFooter() {
   const bits = [];
   if (state.fileMeta?.name) bits.push(state.fileMeta.name);
   if (state.rows.length) bits.push(`${state.rows.length} samples`);
+  if (state.excluded) bits.push(`${state.excluded} excluded, vessel under way`);
   if (state.station) {
     bits.push(`${state.station.lat.toFixed(4)}\u00B0, ${state.station.lon.toFixed(4)}\u00B0`);
   }

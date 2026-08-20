@@ -19,4 +19,10 @@ export const CONFIG = {
   // Directions in the log are magnetic. Leave true unless the device is
   // reconfigured to output true bearings.
   directionsAreMagnetic: true,
+
+  // The vessel is a race committee boat, not a fixed mast. Readings logged while
+  // it is moving are boat-motion artefacts from a different place, so rows above
+  // this speed over ground (knots) are excluded from every display. Rows with no
+  // SOG in the log are kept — that sentinel means a GPS dropout, not motion.
+  maxSogKnots: 2,
 };

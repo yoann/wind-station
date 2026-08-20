@@ -103,6 +103,7 @@ check('rose rendered as svg', !!$('rose').querySelector('svg'));
 check('rose segments match the narrow day (3 sectors x 2 bands)', $('rose').querySelectorAll('path.rose-seg').length === 5, `${$('rose').querySelectorAll('path.rose-seg').length} segments`);
 check('rose legend built', $('rose-legend').children.length === 6);
 check('footer meta populated', /samples/.test($('footer-meta').textContent), $('footer-meta').textContent);
+check('nothing excluded — the fixture day is moored throughout', !/excluded/.test($('footer-meta').textContent), $('footer-meta').textContent);
 check('footer credits the author', /Built by Yoann Peronneau\./.test(document.querySelector('footer').textContent));
 check('two charts created', charts.length === 2, `${charts.length}`);
 
