@@ -10,8 +10,8 @@ export const CONFIG = {
   // Leaving this empty runs the site in demo mode against sample/.
   apiKey: 'AIzaSyAAdtZRjeeHO73HJw_lcJvnTWsDzx13BIo',
 
-  stationName: 'Wind station',
-  placeName: 'Urla, Turkiye',                 // e.g. 'Cesme, Turkiye' — shown under the title
+  stationName: 'Race Committee Vessel',
+  placeName: 'Urla, Türkiye',                 // e.g. 'Cesme, Turkiye' — shown under the title
   timeZone: 'Europe/Istanbul',   // display zone; the log itself is UTC
   defaultUnit: 'kn',             // 'kn' | 'ms' | 'kmh'
   pollSeconds: 30,

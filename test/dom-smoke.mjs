@@ -65,6 +65,8 @@ check('direction readout is the 5-min vector mean, not the raw last sample', $('
 check('beaufort described', $('beaufort-line').textContent === 'gentle breeze, force 3', `got "${$('beaufort-line').textContent}"`);
 check('needle rotated to bearing', /rotate\(3[0-9]{2} 100 100\)/.test($('needle').getAttribute('transform')), $('needle').getAttribute('transform'));
 check('max tile filled', /kn$/.test($('stat-max').textContent), $('stat-max').textContent);
+check('tile labels state the window', $('stat-max-label').textContent === 'Max, last 15 min', $('stat-max-label').textContent);
+check('direction chart note removed', !/Plotted as points/.test(document.body.textContent));
 check('mean tile filled', /kn$/.test($('stat-mean').textContent), $('stat-mean').textContent);
 check('trend tile filled', $('stat-trend').textContent !== '--', $('stat-trend').textContent);
 check('shift tile filled', $('stat-shift').textContent !== '--', $('stat-shift').textContent);
@@ -75,17 +77,28 @@ check('rose rendered as svg', !!$('rose').querySelector('svg'));
 check('rose segments match the narrow day (3 sectors x 2 bands)', $('rose').querySelectorAll('path.rose-seg').length === 5, `${$('rose').querySelectorAll('path.rose-seg').length} segments`);
 check('rose legend built', $('rose-legend').children.length === 6);
 check('footer meta populated', /samples/.test($('footer-meta').textContent), $('footer-meta').textContent);
+check('footer credits the author', /Built by Yoann Peronneau\./.test(document.querySelector('footer').textContent));
 check('two charts created', charts.length === 2, `${charts.length}`);
 
 if (charts.length === 2) {
   const [tws, twd] = charts;
   check('speed chart is a line', tws.config.type === 'line');
   check('direction chart is a scatter', twd.config.type === 'scatter');
-  check('direction y-axis is 0-360', twd.config.options.scales.y.min === 0 && twd.config.options.scales.y.max === 360);
+  const dy = twd.config.options.scales.y;
+  const sy = tws.config.options.scales.y;
+  check('direction y-axis narrows to the data', dy.max - dy.min < 360, `${dy.min}-${dy.max}`);
+  check('direction y-axis brackets every point',
+    twd.data.datasets[0].data.every((p) => p.y >= dy.min && p.y <= dy.max));
+  check('direction y-axis keeps a readable floor', dy.max - dy.min >= 60, `${dy.max - dy.min} deg`);
+  check('speed y-axis lifts off zero on the narrow day', sy.min > 0, `min ${sy.min}`);
+  check('speed y-axis clears the peak', sy.max > Math.max(...tws.data.datasets[0].data.map((p) => p.y ?? 0)));
+  check('speed y-axis keeps a readable floor', sy.max - sy.min >= 5, `${sy.max - sy.min} kn`);
+  check('speed area fills to the axis, not to zero', tws.data.datasets[0].fill === 'start');
   check('x scale configs are distinct objects', tws.config.options.scales.x !== twd.config.options.scales.x);
   check('speed series has 211 points', tws.data.datasets[0].data.length === 211, `${tws.data.datasets[0].data.length}`);
   check('direction series drops nulls', twd.data.datasets[0].data.every((p) => p.y !== null));
-  check('cardinal tick callback', twd.config.options.scales.y.ticks.callback(90) === 'E');
+  check('degree tick callback', dy.ticks.callback(90) === '090\u00B0', dy.ticks.callback(90));
+  check('degree tick callback normalises an unwrapped value', dy.ticks.callback(-5) === '355\u00B0', dy.ticks.callback(-5));
 }
 
 // Unit switch should re-render values and chart series
@@ -97,6 +110,8 @@ check('unit switch updates dial label', $('dial-unit').textContent === 'm/s');
 check('unit switch rebuilt charts', charts.length === 4, `${charts.length} charts created total`);
 if (charts.length === 4) {
   check('series converted to m/s', Math.abs(charts[2].data.datasets[0].data.at(-1).y - 4.4757) < 0.01, `${charts[2].data.datasets[0].data.at(-1).y}`);
+  const msY = charts[2].config.options.scales.y;
+  check('speed floor scales with the unit', msY.max - msY.min >= 5 * 0.514444, `${msY.max - msY.min} m/s`);
 }
 
 // Day picker: switch to the synthetic gale day and re-check the rose fans out

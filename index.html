@@ -57,11 +57,11 @@
 
   <section class="tiles" aria-label="Recent statistics">
     <div class="tile">
-      <p class="tile-label">Max, last hour</p>
+      <p class="tile-label" id="stat-max-label">Max, last 15 min</p>
       <p class="tile-value" id="stat-max">--</p>
     </div>
     <div class="tile">
-      <p class="tile-label">Mean, last hour</p>
+      <p class="tile-label" id="stat-mean-label">Mean, last 15 min</p>
       <p class="tile-value" id="stat-mean">--</p>
     </div>
     <div class="tile">
@@ -103,10 +103,8 @@
     <h2 id="dir-heading">Wind direction <span class="mag-tag">magnetic</span></h2>
     <div class="chart-box chart-dir">
       <canvas id="chart-twd" role="img"
-        aria-label="Scatter plot of wind direction over the selected day, 0 to 360 degrees."></canvas>
+        aria-label="Scatter plot of wind direction over the selected day."></canvas>
     </div>
-    <p class="note">Plotted as points, not a line — a shift from 359&deg; to 002&deg; is 3&deg;,
-      but a line would draw it as a full-scale drop.</p>
   </section>
 
   <section class="panel" aria-labelledby="rose-heading">
@@ -125,6 +123,7 @@
   <p class="footer-caveat">&ldquo;Max&rdquo; is the highest 30-second sample in the window,
     not a meteorological 3-second gust. The dial shows a 5-minute vector mean of direction
     to damp jitter; the direction chart plots every individual sample.</p>
+  <p class="footer-credit">Built by Yoann Peronneau.</p>
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>

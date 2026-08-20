@@ -112,7 +112,7 @@ test('summary over the fixture', () => {
   assert.equal(s.tws, 8.7);
   assert.equal(s.twd, 327);
   assert.equal(s.sampleCount, 211);
-  assert.ok(s.max60 >= s.mean60);
+  assert.ok(s.maxRecent >= s.meanRecent);
   assert.ok(s.shift !== null);
 });
 

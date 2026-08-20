@@ -99,7 +99,7 @@ Encoding **windows-1252**. CRLF line endings. Delimiter is comma-space. Trailing
 ### Sampling interval is not fixed
 
 Observed 17–33 s, mostly 28–32. **Every rolling statistic must use a time window against parsed
-timestamps, never a row count.** "Last hour" is not "the last 120 rows".
+timestamps, never a row count.** "Last 15 minutes" is not "the last 30 rows".
 
 ---
 
@@ -108,8 +108,8 @@ timestamps, never a row count.** "Last hour" is not "the last 120 rows".
 | Value | Rule |
 |---|---|
 | Current | Last row with non-null TWS |
-| Mean (10 min, 60 min) | Arithmetic mean of TWS in the time window |
-| Max (10 min, 60 min) | Max TWS in window — **label "max", not "gust"** |
+| Mean (10 min, 15 min) | Arithmetic mean of TWS in the time window |
+| Max (15 min) | Max TWS in window — **label "max", not "gust"** |
 | Trend | mean(last 10 min) − mean(previous 10 min), shown as ±kn |
 | Direction now | Vector mean of last 5 min |
 | Veer / back | Signed circular difference: vector mean now vs 30 min ago. >0 veering, <0 backing |
@@ -120,8 +120,8 @@ timestamps, never a row count.** "Last hour" is not "the last 120 rows".
 `atan2`. Arithmetic mean of 350° and 010° gives 180° — pointing exactly backwards.
 
 **Do not call the max a gust.** At ~30 s sampling you are recording instantaneous samples, not
-the 3-second peak that "gust" means meteorologically. Labelling it "max, last hour" is accurate
-and costs nothing.
+the 3-second peak that "gust" means meteorologically. Labelling it "max, last 15 min" is
+accurate and costs nothing.
 
 ---
 
@@ -132,9 +132,10 @@ Single page, single column on mobile, max ~900 px on desktop. Order top to botto
 1. **Header** — station name, place name, freshness pill.
 2. **Hero** — compass dial (needle at TWD magnetic) with TWS as the centre number; Beaufort
    descriptor line beneath. This plus the pill fills the first mobile screen.
-3. **Secondary tiles** (2×2) — max 60 min, mean 60 min, trend, veer/back.
-4. **Charts** — TWS line over the day; TWD below it as *dots* on a 0–360 axis with N/E/S/W ticks,
-   sharing one x-axis and one crosshair.
+3. **Secondary tiles** (2×2) — max 15 min, mean 15 min, trend, veer/back. The window is
+   `SUMMARY_MINUTES` in `lib/stats.js`; the tile labels are generated from it.
+4. **Charts** — TWS line over the day; TWD below it as *dots*, sharing one x-axis and one
+   crosshair. Both y-axes are cut to the day's data rather than to a fixed range.
 5. **Wind rose** — 16 sectors × Beaufort bins, computed client-side from the day's rows.
 6. **Day picker + CSV download** — lazy: fetches one day's file on demand. Do not attempt
    multi-day ranges without a backend.
@@ -142,8 +143,17 @@ Single page, single column on mobile, max ~900 px on desktop. Order top to botto
 
 ### Direction is never a line chart
 
-359° → 002° is a 3° shift but plots as a 357° cliff. Dots on a 0–360 axis avoid the artifact
-entirely; a steady breeze still reads as a flat band. Aggregation goes to the rose.
+359° → 002° is a 3° shift but plots as a 357° cliff. Dots avoid the artifact entirely; a
+steady breeze still reads as a flat band. Aggregation goes to the rose.
+
+### Axes are cut to the data, not to the instrument
+
+A 12–18 kn afternoon on a 0-based axis is mostly empty panel, and a northerly on a fixed
+0–360 direction axis splits into two bands hugging opposite edges. So both y-axes take
+their bounds from the day's samples plus a margin, over a minimum span that keeps a flat
+stretch from zooming into sampling noise. Direction additionally unwraps every sample to
+within half a turn of the last 15-minute vector mean, so the band stays whole across
+north; ticks are degrees, normalised back to 0–359 for the label. See `lib/scale.js`.
 
 ### States
 

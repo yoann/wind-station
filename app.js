@@ -1,8 +1,10 @@
 import { CONFIG } from './config.js';
 import { parseLog, decodeLog, dateFromFilename } from './lib/parser.js';
 import {
-  summarise, freshness, formatAge, formatSpeed, UNITS, cardinal16, MINUTE,
+  summarise, freshness, formatAge, formatSpeed, UNITS, cardinal16, MINUTE, SUMMARY_MINUTES,
+  min, max, windowRows, vectorMeanDeg,
 } from './lib/stats.js';
+import { paddedRange, directionRange, unwrapDeg, foldInto, normDeg } from './lib/scale.js';
 import { fetchLatestMeta, listFiles, fetchFileBytes, describeError } from './lib/drive.js';
 import { renderRose, renderRoseLegend } from './lib/rose.js';
 
@@ -12,6 +14,13 @@ const DEMO_FILES = [
   { id: './sample/SsLog-18-08-2026.csv', name: 'SsLog-18-08-2026.csv' },
 ];
 const MAG = CONFIG.directionsAreMagnetic ? '\u00B0 M' : '\u00B0';
+
+// Axis tuning. Both are floors on the *visible* span: without them a steady
+// breeze fills the panel with sampling noise. Speed is in knots and scaled to
+// the display unit, so the axis behaves the same whichever unit is selected.
+const SPEED_MIN_SPAN_KN = 5;
+const DIR_MIN_SPAN_DEG = 60;
+const DIR_CENTRE_MINUTES = 15;
 
 const state = {
   unit: CONFIG.defaultUnit,
@@ -46,6 +55,10 @@ function boot() {
   el('station-name').textContent = CONFIG.stationName;
   if (CONFIG.placeName) el('place-name').textContent = CONFIG.placeName;
   document.title = CONFIG.stationName;
+
+  // Labels come from the constant so they cannot drift from the window.
+  el('stat-max-label').textContent = `Max, last ${SUMMARY_MINUTES} min`;
+  el('stat-mean-label').textContent = `Mean, last ${SUMMARY_MINUTES} min`;
 
   buildDialTicks();
   renderRoseLegend(el('rose-legend'));
@@ -251,8 +264,8 @@ function renderHero(s) {
 
 function renderTiles(s) {
   const u = unitLabel();
-  el('stat-max').textContent = s?.max60 != null ? `${formatSpeed(s.max60, state.unit)} ${u}` : '--';
-  el('stat-mean').textContent = s?.mean60 != null ? `${formatSpeed(s.mean60, state.unit)} ${u}` : '--';
+  el('stat-max').textContent = s?.maxRecent != null ? `${formatSpeed(s.maxRecent, state.unit)} ${u}` : '--';
+  el('stat-mean').textContent = s?.meanRecent != null ? `${formatSpeed(s.meanRecent, state.unit)} ${u}` : '--';
 
   if (s?.trend != null) {
     const v = (s.trend * UNITS[state.unit].factor);
@@ -356,9 +369,28 @@ function renderCharts() {
     x: r.t,
     y: r.tws === null ? null : r.tws * UNITS[state.unit].factor,
   }));
-  const dirData = rows
-    .map((r, i) => ({ x: r.t, y: r.twd, i }))
+  const factor = UNITS[state.unit].factor;
+  const speeds = speedData.map((p) => p.y);
+  const speedAxis = speeds.some((y) => y !== null)
+    ? paddedRange(min(speeds), max(speeds), {
+      minSpan: SPEED_MIN_SPAN_KN * factor, floor: 0,
+    })
+    : { min: 0, max: 10 * factor, step: 2 * factor };
+
+  // The direction axis is continuous, not 0-360: every sample is unwrapped to
+  // within half a turn of the recent mean, so a northerly reads as one band
+  // instead of splitting across the top and bottom edges.
+  const end = rows.length ? rows.at(-1).t : 0;
+  const centre = vectorMeanDeg(windowRows(rows, end, DIR_CENTRE_MINUTES).map((r) => r.twd))
+    ?? vectorMeanDeg(rows.map((r) => r.twd))
+    ?? 180;
+  const unwrapped = rows
+    .map((r, i) => ({ x: r.t, y: unwrapDeg(centre, r.twd), i }))
     .filter((p) => p.y !== null);
+  const dirAxis = directionRange(unwrapped.map((p) => p.y), centre, {
+    minSpan: DIR_MIN_SPAN_DEG,
+  });
+  const dirData = unwrapped.map((p) => ({ ...p, y: foldInto(p.y, dirAxis.min) }));
 
   const makeXScale = () => ({
     type: 'linear',
@@ -384,7 +416,9 @@ function renderCharts() {
         borderWidth: 2,
         pointRadius: 0,
         pointHitRadius: 12,
-        fill: true,
+        // 'start' not true: `true` fills to y=0, which is off-scale once the
+        // axis floor lifts off zero and floods the whole panel.
+        fill: 'start',
         tension: 0.3,
         spanGaps: false,
       }],
@@ -406,10 +440,15 @@ function renderCharts() {
       scales: {
         x: makeXScale(),
         y: {
-          beginAtZero: true,
+          min: speedAxis.min,
+          max: speedAxis.max,
           grid: { color: theme.grid },
           border: { display: false },
-          ticks: { color: theme.tick, font: { size: 11 } },
+          ticks: {
+            color: theme.tick, font: { size: 11 }, stepSize: speedAxis.step,
+            // Chart.js would localise the separator; the rest of the page is en-GB.
+            callback: (v) => v.toFixed(speedAxis.step < 1 ? 1 : 0),
+          },
           title: { display: true, text: unitLabel(), color: theme.tick, font: { size: 11 } },
         },
       },
@@ -441,7 +480,7 @@ function renderCharts() {
           callbacks: {
             title: (items) => clockAt(items[0].parsed.x),
             label: (item) => {
-              const d = Math.round(item.parsed.y);
+              const d = Math.round(normDeg(item.parsed.y));
               return `${String(d).padStart(3, '0')}${MAG} ${cardinal16(d)}`;
             },
           },
@@ -450,13 +489,13 @@ function renderCharts() {
       scales: {
         x: makeXScale(),
         y: {
-          min: 0,
-          max: 360,
+          min: dirAxis.min,
+          max: dirAxis.max,
           grid: { color: theme.grid },
           border: { display: false },
           ticks: {
-            color: theme.tick, font: { size: 11 }, stepSize: 90,
-            callback: (v) => ({ 0: 'N', 90: 'E', 180: 'S', 270: 'W', 360: 'N' }[v] ?? ''),
+            color: theme.tick, font: { size: 11 }, stepSize: dirAxis.step,
+            callback: (v) => `${String(Math.round(normDeg(v))).padStart(3, '0')}\u00B0`,
           },
         },
       },

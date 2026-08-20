@@ -77,8 +77,12 @@ The parser handles these, all observed in real files:
 ## Design notes worth keeping
 
 - **Direction is never a line chart.** 359° → 002° is a 3° shift; a line draws
-  it as a full-scale cliff. Individual samples are plotted as points on a
-  0–360 axis, and aggregation goes to the wind rose.
+  it as a full-scale cliff. Individual samples are plotted as points, and
+  aggregation goes to the wind rose.
+- **Both chart axes are cut to the data.** Min and max come from the day's
+  samples plus a margin, over a minimum span so a flat stretch does not zoom
+  into sampling noise. Direction is centred on the last 15-minute vector mean
+  and unwrapped around it, keeping a northerly in one band. See `lib/scale.js`.
 - **Circular means use vectors.** The arithmetic mean of 350° and 010° is 180°,
   pointing exactly backwards. `vectorMeanDeg` averages unit vectors instead.
 - **The dial smooths, the chart does not.** The hero shows a 5-minute vector

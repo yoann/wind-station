@@ -104,8 +104,12 @@ A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
 ## 5. Design invariants — do not break these
 
 1. **Direction is never a line chart.** 359° → 002° is a 3° shift; a line draws
-   it as a full-scale cliff. Samples are plotted as points on a 0–360 axis.
+   it as a full-scale cliff. Samples are plotted as points.
    Aggregation goes to the wind rose.
+   The *axis* is continuous, though: points are unwrapped to within half a turn
+   of the last 15-minute vector mean (`lib/scale.js`), so a northerly reads as
+   one band instead of splitting across the top and bottom edges. Tick labels
+   normalise back to 0–359.
 2. **Circular means use unit vectors.** Arithmetic mean of 350° and 010° is
    180° — exactly backwards. See `vectorMeanDeg` in `lib/stats.js`.
 3. **"Max", not "gust".** At 30 s sampling these are instantaneous samples, not
