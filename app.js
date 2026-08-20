@@ -2,6 +2,7 @@ import { CONFIG } from './config.js';
 import { parseLog, decodeLog, dateFromFilename } from './lib/parser.js';
 import {
   summarise, freshness, formatAge, formatSpeed, UNITS, cardinal16, MINUTE, SUMMARY_MINUTES,
+  TREND_MINUTES, SHIFT_MINUTES,
   min, max, windowRows, vectorMeanDeg, mooredRows,
 } from './lib/stats.js';
 import { paddedRange, directionRange, unwrapDeg, foldInto, normDeg } from './lib/scale.js';
@@ -66,6 +67,8 @@ function boot() {
   // Labels come from the constant so they cannot drift from the window.
   el('stat-max-label').textContent = `Max, last ${SUMMARY_MINUTES} min`;
   el('stat-mean-label').textContent = `Mean, last ${SUMMARY_MINUTES} min`;
+  el('stat-trend-label').textContent = `Trend, ${TREND_MINUTES} min`;
+  el('stat-shift-label').textContent = `Shift, ${SHIFT_MINUTES} min`;
 
   buildDialTicks();
   renderRoseLegend(el('rose-legend'));

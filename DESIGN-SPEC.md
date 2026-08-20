@@ -108,11 +108,11 @@ timestamps, never a row count.** "Last 15 minutes" is not "the last 30 rows".
 | Value | Rule |
 |---|---|
 | Current | Last row with non-null TWS |
-| Mean (10 min, 15 min) | Arithmetic mean of TWS in the time window |
+| Mean (15 min) | Arithmetic mean of TWS in the time window |
 | Max (15 min) | Max TWS in window — **label "max", not "gust"** |
-| Trend | mean(last 10 min) − mean(previous 10 min), shown as ±kn |
+| Trend | mean(last 15 min) − mean(previous 15 min), shown as ±kn |
 | Direction now | Vector mean of last 5 min |
-| Veer / back | Signed circular difference: vector mean now vs 30 min ago. >0 veering, <0 backing |
+| Veer / back | Signed circular difference: vector mean now vs 15 min ago. >0 veering, <0 backing |
 | Beaufort | Standard knots→force bands, with descriptor ("fresh breeze, force 5") |
 | Cardinal | 16-point from magnetic degrees, suffixed `M` |
 
@@ -133,7 +133,8 @@ Single page, single column on mobile, max ~900 px on desktop. Order top to botto
 2. **Hero** — compass dial (needle at TWD magnetic) with TWS as the centre number; Beaufort
    descriptor line beneath. This plus the pill fills the first mobile screen.
 3. **Secondary tiles** (2×2) — max 15 min, mean 15 min, trend, veer/back. The window is
-   `SUMMARY_MINUTES` in `lib/stats.js`; the tile labels are generated from it.
+   `SUMMARY_MINUTES` in `lib/stats.js` (`TREND_MINUTES` / `SHIFT_MINUTES` for the other
+   two); every tile label is generated from those constants.
 4. **Charts** — TWS line over the day; TWD below it as *dots*, sharing one x-axis and one
    crosshair. Both y-axes are cut to the day's data rather than to a fixed range.
 5. **Wind rose** — 16 sectors × Beaufort bins, computed client-side from the day's rows.
