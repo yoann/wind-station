@@ -26,12 +26,38 @@ class ChartStub {
 }
 window.Chart = ChartStub;
 
+// Stub Google Drive. config.js carries a real API key, so the page takes the
+// live path, not demo mode — the stub has to answer files.list and alt=media
+// the way Drive does. File ids are the sample filenames so a failure names the
+// day it came from. Newest first: the 19th is the real 211-row log.
+const DRIVE_FILES = [
+  { id: 'drv-SsLog-19-08-2026.csv', name: 'SsLog-19-08-2026.csv', modifiedTime: '2026-08-19T14:05:00.000Z', size: '21441' },
+  { id: 'drv-SsLog-18-08-2026.csv', name: 'SsLog-18-08-2026.csv', modifiedTime: '2026-08-18T23:59:00.000Z', size: '193324' },
+];
+
+const sampleBody = (name) => {
+  const buf = readFileSync(`${APP}/sample/${name}`);
+  return { ok: true, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) };
+};
+
 window.fetch = async (url) => {
-  const name = String(url).split('/').pop();
-  if (/^SsLog-.*\.csv$/.test(name)) {
-    const buf = readFileSync(`${APP}/sample/${name}`);
-    return { ok: true, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) };
+  const u = new URL(String(url), 'https://example.org/');
+
+  // files.list — honours pageSize, already sorted newest-first
+  if (u.pathname === '/drive/v3/files') {
+    const pageSize = Number(u.searchParams.get('pageSize') ?? 1);
+    const files = DRIVE_FILES.slice(0, pageSize);
+    return { ok: true, json: async () => ({ files }) };
   }
+
+  // files/{id}?alt=media
+  const id = decodeURIComponent(u.pathname.split('/').pop());
+  const meta = DRIVE_FILES.find((f) => f.id === id);
+  if (meta && u.searchParams.get('alt') === 'media') return sampleBody(meta.name);
+
+  // Demo mode still works if the API key is ever cleared from config.js
+  if (/^SsLog-.*\.csv$/.test(id)) return sampleBody(id);
+
   throw new Error(`unexpected fetch: ${url}`);
 };
 
@@ -58,8 +84,8 @@ const check = (name, cond, detail = '') => {
   else { console.log(`  FAIL ${name}${detail ? ' — ' + detail : ''}`); fails.push(name); }
 };
 
-console.log('\nDOM smoke test (demo mode, sample file):');
-check('demo banner shown', !$('banner').hidden);
+console.log('\nDOM smoke test (live Drive path, stubbed):');
+check('no demo banner — config.js has an API key', $('banner').hidden);
 check('speed readout populated', $('dial-speed').textContent === '8.7', `got "${$('dial-speed').textContent}"`);
 check('direction readout is the 5-min vector mean, not the raw last sample', $('direction-line').textContent === '334° M NNW', `got "${$('direction-line').textContent}"`);
 check('beaufort described', $('beaufort-line').textContent === 'gentle breeze, force 3', `got "${$('beaufort-line').textContent}"`);
@@ -115,7 +141,7 @@ if (charts.length === 4) {
 }
 
 // Day picker: switch to the synthetic gale day and re-check the rose fans out
-$('day-select').value = './sample/SsLog-18-08-2026.csv';
+$('day-select').value = 'drv-SsLog-18-08-2026.csv';
 $('day-select').dispatchEvent(new window.Event('change'));
 await new Promise((r) => setTimeout(r, 400));
 console.log('\nAfter switching to the synthetic gale day:');

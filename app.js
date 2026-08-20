@@ -7,6 +7,7 @@ import {
 import { paddedRange, directionRange, unwrapDeg, foldInto, normDeg } from './lib/scale.js';
 import { fetchLatestMeta, listFiles, fetchFileBytes, describeError } from './lib/drive.js';
 import { renderRose, renderRoseLegend } from './lib/rose.js';
+import { Chart } from './lib/chart.js';
 
 const DEMO = !CONFIG.apiKey;
 const DEMO_FILES = [

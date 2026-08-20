@@ -32,7 +32,9 @@ fixed unless the user reopens them.
 | Direction reference | **Magnetic**, uncorrected | The log emits `306° M`. No WMM conversion. Labelled `M` everywhere |
 | Position | Fixed marker, footer only | Vessel is moored (~13 m of drift). No map, no live position broadcast |
 | Columns used | Date, Time, TWS, TWD | SOG/COG/TWA dropped from display, kept in the CSV download |
-| Charting | Chart.js 4 from CDN | Only external dependency |
+| Charting | Chart.js 4, bundled | Was a CDN script; now tree-shaken into the build, no runtime third party |
+| Build | Vite, output to `dist/` | One JS + one CSS request instead of 8 files plus a CDN hit |
+| Deployment | GitHub Actions → Pages | Publishes `dist/` only, so the repo root is not served |
 
 **Deliberately not built:** a map; multi-day aggregation (needs precomputation a
 static site can't do); `Range` requests for the growing file tail.
@@ -43,19 +45,25 @@ static site can't do); `Range` requests for the growing file tail.
 
 ```
 wind-station/
-  index.html                    page structure
+  index.html                    page structure, and the Vite build entry
   app.css                       theme, light + dark
   app.js                        state, polling, rendering, charts
   config.js                     THE ONLY FILE THE USER EDITS TO GO LIVE
+                                (bundled at build time — a change needs a push)
+  vite.config.js                build config
+  public/                       copied verbatim into dist/ (CNAME, .nojekyll)
+  .github/workflows/deploy.yml  test, build, publish dist/ to Pages
+  lib/chart.js                  Chart.js + only the registrations used
   lib/parser.js                 CSV → rows
   lib/stats.js                  time windows, circular means, Beaufort, units
+  lib/scale.js                  chart axis domains
   lib/drive.js                  Drive REST client
   lib/rose.js                   wind rose SVG
   sample/SsLog-19-08-2026.csv   REAL log from the device (211 rows, 105 min)
   sample/SsLog-18-08-2026.csv   SYNTHETIC stress day (1922 rows, generated)
   test/parser.test.mjs          16 assertions
   test/stress.test.mjs          6 assertions
-  test/dom-smoke.mjs            34 assertions, jsdom + stubbed Chart.js
+  test/dom-smoke.mjs            34 assertions, jsdom + stubbed Chart.js/Drive
   test/make-stress-fixture.py   regenerates the synthetic day
   README.md                     setup and deployment
 ```
@@ -63,16 +71,26 @@ wind-station/
 Verification status, all passing as of handover:
 
 ```bash
-node --test 'test/*.test.mjs'          # 22 tests
-npm install --no-save jsdom
-node test/dom-smoke.mjs                # 34 assertions
-python3 -m http.server 8080            # visual check, demo mode
+npm install
+npm test                               # 38 assertions
+npm run test:dom                       # 34 assertions
+npm run build && npm run preview       # visual check of the real bundle
 ```
 
 The DOM smoke test boots the real `index.html` under jsdom with `window.Chart`
-stubbed, because the CDN was unreachable in the original build sandbox. **The
-charts have therefore never been rendered by real Chart.js.** First task in a
-networked environment: load the page in a browser and confirm both charts draw.
+stubbed — jsdom has no canvas context — and with `fetch` emulating Drive, since
+`config.js` now carries an API key and the page takes the live path.
+
+Real Chart.js rendering has since been confirmed in a browser against the built
+bundle: both charts draw, tooltips appear, and the crosshair plugin syncs hover
+across the two. That check cannot use the deployed API key from localhost (it is
+referrer-restricted and returns 403), so it was done by stubbing `fetch` in a
+throwaway copy of `dist/`.
+
+Because Chart.js is now registered piecemeal in `lib/chart.js` rather than
+auto-registered, **a chart config using a component that is not registered will
+throw at render time and no test will catch it** — the smoke test stubs Chart.js
+out. Adding a chart type, scale or plugin means adding it there too.
 
 ---
 

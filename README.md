@@ -3,7 +3,8 @@
 A static, public, live-first page showing wind speed and direction from a
 device that writes one CSV per day into a Google Drive folder.
 
-No backend, no build step. One charting library from a CDN; everything else is
+No backend. A Vite build bundles the page into one JS file and one CSS file —
+Chart.js included, so nothing is fetched from a CDN at runtime. The source is
 plain HTML, CSS and ES modules.
 
 **All directions are magnetic**, exactly as the instrument logs them. Nothing is
@@ -14,16 +15,20 @@ corrected to true north.
 ## Run it now
 
 ```bash
-python3 -m http.server 8080     # or: npx serve
-open http://localhost:8080
+npm install
+npm run dev          # http://localhost:5173
 ```
 
 With no API key configured, the site starts in **demo mode** against the two
 bundled sample days, so you can see it working before touching Google Cloud.
-The day picker switches between them.
+The day picker switches between them. `sample/` is served by the dev server but
+is deliberately left out of the production build.
 
-You must serve over HTTP. Opening `index.html` from the filesystem fails —
-ES modules are blocked on `file://`.
+To check the real build output rather than the dev server:
+
+```bash
+npm run build && npm run preview
+```
 
 ## Go live
 
@@ -41,8 +46,13 @@ ES modules are blocked on `file://`.
 
 3. **Fill in `config.js`** — `apiKey`, `stationName`, `placeName`.
 
-4. **Deploy the folder** to any static host: Cloudflare Pages, Netlify, GitHub
-   Pages. Nothing needs to run server-side.
+4. **Push to `main`.** `.github/workflows/deploy.yml` runs the tests, builds,
+   and publishes **only `dist/`** to GitHub Pages. The repo root — this README,
+   the specs, `sample/`, `test/`, the unbundled sources — is never served.
+
+   This requires *Settings → Pages → Source* set to **GitHub Actions**. Note
+   that `config.js` is bundled at build time, so a config change needs a push,
+   not an edit on the server. Nothing runs server-side.
 
 ## How it fetches
 
@@ -97,12 +107,12 @@ The parser handles these, all observed in real files:
 ## Tests
 
 ```bash
-node --test 'test/*.test.mjs'
+npm test
 ```
 
-22 assertions over the parser, the statistics and the wind rose, with fixtures
-taken from a real log: 211 rows, 3 header blocks, 13 sentinel rows, TWS
-7.3–11.2, TWD 296–339 M.
+38 assertions over the parser, the statistics, the axis scales and the wind
+rose, with fixtures taken from a real log: 211 rows, 3 header blocks,
+13 sentinel rows, TWS 7.3–11.2, TWD 296–339 M.
 
 `test/stress.test.mjs` runs against a synthetic day that the real sample cannot
 exercise — gale-force 41 kn, all 16 direction sectors, and a 40-minute outage.
@@ -113,25 +123,30 @@ python3 test/make-stress-fixture.py > sample/SsLog-18-08-2026.csv
 ```
 
 There is also a DOM smoke test that boots the real page under jsdom with
-Chart.js stubbed, checking the readouts, tiles, rose, charts, unit switch and
-day picker end to end:
+Chart.js stubbed and Drive faked, checking the readouts, tiles, rose, charts,
+unit switch and day picker end to end:
 
 ```bash
-npm install --no-save jsdom
-node test/dom-smoke.mjs
+npm run test:dom
 ```
+
+Both suites run in CI and a failure blocks the deploy.
 
 ## Layout
 
 ```
-index.html        page structure
+index.html        page structure, and the Vite build entry
 app.css           theme, light and dark
 app.js            state, polling, rendering, charts
 config.js         the only file you need to edit
 lib/parser.js     CSV → rows
 lib/stats.js      windows, circular means, Beaufort, units
+lib/scale.js      chart axis domains
 lib/drive.js      Drive REST client
 lib/rose.js       wind rose SVG
+lib/chart.js      Chart.js, with only the used pieces registered
+vite.config.js    build config
+public/           copied verbatim into dist/ (CNAME, .nojekyll)
 ```
 
 ## Not built yet
