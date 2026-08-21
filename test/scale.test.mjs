@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { niceStep, paddedRange, directionRange, unwrapDeg, foldInto, normDeg } from '../lib/scale.js';
+import { niceStep, paddedRange, directionRange, unwrapDeg, foldInto, normDeg, breakWraps } from '../lib/scale.js';
 import { min, max, vectorMeanDeg } from '../lib/stats.js';
 
 test('min mirrors max, nulls and all', () => {
@@ -119,4 +119,25 @@ test('folding is a no-op on a narrow axis', () => {
   const ys = [240, 255, 262, 271, 290].map((d) => unwrapDeg(centre, d));
   const r = directionRange(ys, centre, { minSpan: 60 });
   assert.deepEqual(ys.map((y) => foldInto(y, r.min)), ys);
+});
+
+test('breakWraps leaves a well-behaved series alone', () => {
+  const pts = [{ x: 1, y: 300 }, { x: 2, y: 310 }, { x: 3, y: 295 }];
+  assert.deepEqual(breakWraps(pts), pts);
+});
+
+test('breakWraps cuts the line where a fold puts it on the far edge', () => {
+  // 358 -> 002 folds to a near-full-height jump on the full-turn axis. A line
+  // must not draw that cliff, so the series is broken instead.
+  const out = breakWraps([{ x: 1, y: 358 }, { x: 2, y: 2 }]);
+  assert.deepEqual(out, [{ x: 1, y: 358 }, { x: 2, y: null }, { x: 2, y: 2 }]);
+});
+
+test('breakWraps passes existing gaps through without doubling them', () => {
+  const out = breakWraps([{ x: 1, y: 10 }, { x: 2, y: null }, { x: 3, y: 200 }]);
+  assert.deepEqual(out, [{ x: 1, y: 10 }, { x: 2, y: null }, { x: 3, y: 200 }]);
+});
+
+test('breakWraps handles an empty series', () => {
+  assert.deepEqual(breakWraps([]), []);
 });

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { parseLogBytes, parseTimestamp, parseDegMin, parseBearing, parseNumber, dateFromFilename } from '../lib/parser.js';
-import { vectorMeanDeg, circularDiff, beaufort, cardinal16, summarise, windowRows, formatSpeed, mooredRows } from '../lib/stats.js';
+import { vectorMeanDeg, circularDiff, beaufort, cardinal16, summarise, windowRows, formatSpeed, mooredRows, rollingVectorMeanDeg } from '../lib/stats.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bytes = readFileSync(join(here, '..', 'sample', 'SsLog-19-08-2026.csv'));
@@ -154,4 +154,68 @@ test('mooredRows over a parsed under-way log', () => {
   const kept = mooredRows(parsed.rows, 2);
   assert.equal(kept.length, 2);
   assert.deepEqual(kept.map((r) => r.tws), [8.4, 8.6]);
+});
+
+test('fixture: the first row of each logging session is marked, not dropped', () => {
+  // Headers sit at lines 1, 2 and 5 of the real file. The first two are
+  // consecutive, so they mark one row between them, not two.
+  const marked = rows.filter((r) => r.sessionStart);
+  assert.equal(rows.length, 211, 'the parser marks, it does not filter');
+  assert.deepEqual(
+    marked.map((r) => new Date(r.t).toISOString()),
+    ['2026-08-19T10:18:02.000Z', '2026-08-19T10:19:00.000Z'],
+  );
+});
+
+test('consecutive headers mark one row, and every other row is unmarked', () => {
+  const log = [
+    "'Date, 'Time, 'Latitude, 'Longitude, 'SOG, 'COG, 'TWS, 'TWA, 'TWD, 'Comment, ",
+    "'Date, 'Time, 'Latitude, 'Longitude, 'SOG, 'COG, 'TWS, 'TWA, 'TWD, 'Comment, ",
+    "19/08/2026, 10:00:00 UTC, 38\xB0 19.080' N, 026\xB0 41.698' E, 00.1, 355\xB0 M, 08.4, 026\xB0 Port, 306\xB0 M, , ",
+    "19/08/2026, 10:00:30 UTC, 38\xB0 19.080' N, 026\xB0 41.698' E, 00.1, 355\xB0 M, 08.1, 043\xB0 Port, 305\xB0 M, , ",
+    "'Date, 'Time, 'Latitude, 'Longitude, 'SOG, 'COG, 'TWS, 'TWA, 'TWD, 'Comment, ",
+    "19/08/2026, 10:01:00 UTC, 38\xB0 19.081' N, 026\xB0 41.700' E, 00.1, 355\xB0 M, 08.0, 025\xB0 Port, 307\xB0 M, , ",
+  ].join('\r\n');
+  const parsed = parseLogBytes(Buffer.from(log, 'latin1'));
+  assert.deepEqual(parsed.rows.map((r) => r.sessionStart), [true, false, true]);
+});
+
+test('rolling direction mean wraps through north instead of averaging backwards', () => {
+  const rowsAt = (...pairs) => pairs.map(([min, twd]) => ({ t: min * 60_000, twd }));
+  const out = rollingVectorMeanDeg(rowsAt([0, 355], [1, 5]), 5);
+  assert.equal(out.length, 2);
+  assert.equal(out[0], 355);
+  assert.ok(out[1] < 1 || out[1] > 359, `expected ~0 degrees, got ${out[1]}`);
+});
+
+test('rolling direction mean uses a time window, not a row count', () => {
+  // Four samples crowded into one minute, then one 10 minutes later: the last
+  // window must hold only itself, however many rows preceded it.
+  const rows5 = [
+    { t: 0, twd: 100 }, { t: 20_000, twd: 100 }, { t: 40_000, twd: 100 },
+    { t: 60_000, twd: 100 }, { t: 10 * 60_000, twd: 200 },
+  ];
+  const out = rollingVectorMeanDeg(rows5, 5);
+  assert.equal(Math.round(out[3]), 100);
+  assert.equal(Math.round(out[4]), 200, 'the 100-degree run has aged out');
+});
+
+test('rolling direction mean is null-safe and aligned to its input', () => {
+  const rows5 = [
+    { t: 0, twd: null }, { t: 30_000, twd: 90 }, { t: 60_000, twd: 110 },
+  ];
+  const out = rollingVectorMeanDeg(rows5, 5);
+  assert.equal(out.length, 3);
+  assert.equal(out[0], null, 'a window holding no bearing yields null, not 0');
+  assert.equal(Math.round(out[1]), 90);
+  assert.equal(Math.round(out[2]), 100);
+  assert.deepEqual(rollingVectorMeanDeg([], 5), []);
+});
+
+test('rolling direction mean over the fixture tracks the dial', () => {
+  // The line's right-hand end is the number under the dial: same window,
+  // same maths. This is the coherence the shared SMOOTH_MINUTES buys.
+  const out = rollingVectorMeanDeg(rows, 5);
+  assert.equal(out.length, rows.length);
+  assert.equal(Math.round(out.at(-1)), Math.round(summarise(rows).dirSmoothed));
 });

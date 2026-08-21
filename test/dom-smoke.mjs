@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom';
 
 const APP = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 const html = readFileSync(`${APP}/index.html`, 'utf8');
+const appCss = readFileSync(`${APP}/app.css`, 'utf8');
 
 
 const dom = new JSDOM(html, { url: 'https://example.org/', pretendToBeVisual: true });
@@ -104,6 +105,12 @@ check('rose segments match the narrow day (3 sectors x 2 bands)', $('rose').quer
 check('rose legend built', $('rose-legend').children.length === 6);
 check('footer meta populated', /samples/.test($('footer-meta').textContent), $('footer-meta').textContent);
 check('nothing excluded — the fixture day is moored throughout', !/excluded/.test($('footer-meta').textContent), $('footer-meta').textContent);
+// The direction dots read --accent-soft. Without it in both themes they fall
+// back to a Chart.js default and stop matching the line they sit under.
+check('both themes define the soft accent the direction dots use',
+  (appCss.match(/--accent-soft:/g) || []).length === 2,
+  `${(appCss.match(/--accent-soft:/g) || []).length} definitions`);
+check('footer discloses the startup rows dropped', /2 dropped at startup/.test($('footer-meta').textContent), $('footer-meta').textContent);
 check('footer credits the author', /Built by Yoann Peronneau\./.test(document.querySelector('footer').textContent));
 check('two charts created', charts.length === 2, `${charts.length}`);
 
@@ -122,8 +129,40 @@ if (charts.length === 2) {
   check('speed y-axis keeps a readable floor', sy.max - sy.min >= 5, `${sy.max - sy.min} kn`);
   check('speed area fills to the axis, not to zero', tws.data.datasets[0].fill === 'start');
   check('x scale configs are distinct objects', tws.config.options.scales.x !== twd.config.options.scales.x);
-  check('speed series has 211 points', tws.data.datasets[0].data.length === 211, `${tws.data.datasets[0].data.length}`);
+  // 211 parsed rows, less the 2 that opened a logging session.
+  check('speed series has 209 points', tws.data.datasets[0].data.length === 209, `${tws.data.datasets[0].data.length}`);
   check('direction series drops nulls', twd.data.datasets[0].data.every((p) => p.y !== null));
+
+  // The samples stay dots; only the 5-minute mean is drawn as a line.
+  check('direction chart overlays a mean line on the samples', twd.data.datasets.length === 2,
+    `${twd.data.datasets.length} datasets`);
+  const avg = twd.data.datasets[1];
+  check('mean series is a line', avg?.type === 'line', `${avg?.type}`);
+  check('mean line is labelled with its window', avg?.label === '5-min mean', `${avg?.label}`);
+  check('mean line draws over the samples', avg?.order < twd.data.datasets[0].order);
+  // Colours resolve to '' here — jsdom never loads app.css — so the shade is
+  // checked in the stylesheet and confirmed by eye in a browser.
+  check('samples get a hover colour distinct from their resting shade',
+    'pointHoverBackgroundColor' in twd.data.datasets[0]);
+  // syncTo() cross-highlights the charts by position, so the two direction
+  // datasets have to stay the same length.
+  check('mean series aligns with the samples',
+    avg?.data.length >= twd.data.datasets[0].data.length, `${avg?.data.length}`);
+  check('mean line honours its gaps', avg?.spanGaps === false);
+  check('mean line stays inside the axis',
+    avg?.data.every((p) => p.y === null || (p.y >= dy.min && p.y <= dy.max)));
+  check('mean line never draws a wrap cliff', (() => {
+    let prev = null;
+    for (const p of avg?.data ?? []) {
+      if (p.y === null) { prev = null; continue; }
+      if (prev !== null && Math.abs(p.y - prev) > 180) return false;
+      prev = p.y;
+    }
+    return true;
+  })());
+  check('tooltip reports the sample, not the mean',
+    twd.config.options.plugins.tooltip.filter({ datasetIndex: 0 }) === true
+    && twd.config.options.plugins.tooltip.filter({ datasetIndex: 1 }) === false);
   check('degree tick callback', dy.ticks.callback(90) === '090\u00B0', dy.ticks.callback(90));
   check('degree tick callback normalises an unwrapped value', dy.ticks.callback(-5) === '355\u00B0', dy.ticks.callback(-5));
 }

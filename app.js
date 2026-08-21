@@ -2,10 +2,12 @@ import { CONFIG } from './config.js';
 import { parseLog, decodeLog, dateFromFilename } from './lib/parser.js';
 import {
   summarise, freshness, formatAge, formatSpeed, UNITS, cardinal16, MINUTE, SUMMARY_MINUTES,
-  TREND_MINUTES, SHIFT_MINUTES,
-  min, max, windowRows, vectorMeanDeg, mooredRows,
+  TREND_MINUTES, SHIFT_MINUTES, SMOOTH_MINUTES,
+  min, max, windowRows, vectorMeanDeg, rollingVectorMeanDeg, mooredRows,
 } from './lib/stats.js';
-import { paddedRange, directionRange, unwrapDeg, foldInto, normDeg } from './lib/scale.js';
+import {
+  paddedRange, directionRange, unwrapDeg, foldInto, normDeg, breakWraps,
+} from './lib/scale.js';
 import { fetchLatestMeta, listFiles, fetchFileBytes, describeError } from './lib/drive.js';
 import { renderRose, renderRoseLegend } from './lib/rose.js';
 import { Chart } from './lib/chart.js';
@@ -35,6 +37,7 @@ const state = {
   rawText: '',
   fileMeta: null,       // { id, name, modifiedTime }
   excluded: 0,          // rows dropped because the vessel was under way
+  warmup: 0,            // rows dropped as the instrument's first of a session
   viewingDay: '',       // '' = follow latest, otherwise a file id
   error: null,
   backoff: 0,
@@ -186,8 +189,12 @@ async function load({ force = false } = {}) {
 function ingest(bytes, meta) {
   state.rawText = decodeLog(bytes);
   const { rows, station } = parseLog(state.rawText);
-  state.rows = mooredRows(rows, CONFIG.maxSogKnots);
-  state.excluded = rows.length - state.rows.length;
+  // The first reading of each logging session is the instrument starting up.
+  // Dropped before the SOG filter so it is counted here and not absorbed there.
+  const running = rows.filter((r) => !r.sessionStart);
+  state.warmup = rows.length - running.length;
+  state.rows = mooredRows(running, CONFIG.maxSogKnots);
+  state.excluded = running.length - state.rows.length;
   // The marker has to come from a stationary row too: a file that opens
   // mid-passage would otherwise pin the footer to wherever the boat was moving.
   const fixed = state.rows.find((r) => r.lat !== null && r.lon !== null);
@@ -343,6 +350,7 @@ function renderFooter() {
   if (state.fileMeta?.name) bits.push(state.fileMeta.name);
   if (state.rows.length) bits.push(`${state.rows.length} samples`);
   if (state.excluded) bits.push(`${state.excluded} excluded, vessel under way`);
+  if (state.warmup) bits.push(`${state.warmup} dropped at startup`);
   if (state.station) {
     bits.push(`${state.station.lat.toFixed(4)}\u00B0, ${state.station.lon.toFixed(4)}\u00B0`);
   }
@@ -357,7 +365,13 @@ function css(name) {
 }
 
 function chartTheme() {
-  return { tick: css('--ink-3'), grid: css('--line'), accent: css('--accent'), ink: css('--ink') };
+  return {
+    tick: css('--ink-3'),
+    grid: css('--line'),
+    accent: css('--accent'),
+    soft: css('--accent-soft'),
+    ink: css('--ink'),
+  };
 }
 
 const crosshair = {
@@ -401,13 +415,23 @@ function renderCharts() {
   const centre = vectorMeanDeg(windowRows(rows, end, DIR_CENTRE_MINUTES).map((r) => r.twd))
     ?? vectorMeanDeg(rows.map((r) => r.twd))
     ?? 180;
+  const meanDeg = rollingVectorMeanDeg(rows, SMOOTH_MINUTES);
   const unwrapped = rows
-    .map((r, i) => ({ x: r.t, y: unwrapDeg(centre, r.twd), i }))
+    .map((r, i) => ({ x: r.t, y: unwrapDeg(centre, r.twd), avg: meanDeg[i], i }))
     .filter((p) => p.y !== null);
   const dirAxis = directionRange(unwrapped.map((p) => p.y), centre, {
     minSpan: DIR_MIN_SPAN_DEG,
   });
   const dirData = unwrapped.map((p) => ({ ...p, y: foldInto(p.y, dirAxis.min) }));
+
+  // The mean goes through the same unwrap-and-fold as the samples, so the line
+  // and the dots share one axis. Same length as dirData on purpose: syncTo()
+  // cross-highlights the charts by position, and a shorter series would desync
+  // the crosshair.
+  const avgData = breakWraps(dirData.map((p) => ({
+    x: p.x,
+    y: p.avg === null ? null : foldInto(unwrapDeg(centre, p.avg), dirAxis.min),
+  })));
 
   const makeXScale = () => ({
     type: 'linear',
@@ -478,13 +502,30 @@ function renderCharts() {
   twdChart = new Chart(el('chart-twd'), {
     type: 'scatter',
     data: {
-      datasets: [{
-        label: 'Wind direction',
-        data: dirData,
-        backgroundColor: theme.accent,
-        pointRadius: 2.2,
-        pointHoverRadius: 4,
-      }],
+      datasets: [
+        // Samples stay dataset 0: syncTo() and the DOM smoke test both index it.
+        {
+          label: 'Wind direction',
+          data: dirData,
+          backgroundColor: theme.soft,
+          pointHoverBackgroundColor: theme.accent,
+          pointRadius: 2.2,
+          pointHoverRadius: 4,
+          order: 2,              // higher order draws first, i.e. behind
+        },
+        {
+          type: 'line',          // mixed dataset; LineController is registered
+          label: `${SMOOTH_MINUTES}-min mean`,
+          data: avgData,
+          borderColor: theme.accent,
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          spanGaps: false,       // honour the wrap breaks
+          tension: 0,            // already smoothed; no Bezier on top
+          order: 1,
+        },
+      ],
     },
     options: {
       responsive: true,
@@ -494,6 +535,9 @@ function renderCharts() {
       plugins: {
         legend: { display: false },
         tooltip: {
+          // The mean line is context, not a reading: report the sample under
+          // the cursor, never the smoothed value.
+          filter: (item) => item.datasetIndex === 0,
           callbacks: {
             title: (items) => clockAt(items[0].parsed.x),
             label: (item) => {

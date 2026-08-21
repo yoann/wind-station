@@ -33,6 +33,8 @@ fixed unless the user reopens them.
 | Position | Fixed marker, footer only | Vessel is moored (~13 m of drift). No map, no live position broadcast |
 | Columns used | Date, Time, TWS, TWD | SOG/COG/TWA dropped from display, kept in the CSV download |
 | Under-way rows | Excluded above `CONFIG.maxSogKnots` (2 kn) | The boat is a race committee vessel; rows logged while it moves are boat-motion readings from elsewhere. Null SOG is kept |
+| Startup rows | First data row after every header dropped | The device writes a header per logging session; the reading that follows is the instrument warming up. 2 of 211 on the real fixture |
+| Direction chart | Dots for every sample, plus a 5-min vector mean line | The dots show spread, the line shows trend. 5 min keeps the 8–12 min oscillations a sailor reads for, and matches the dial |
 | Charting | Chart.js 4, bundled | Was a CDN script; now tree-shaken into the build, no runtime third party |
 | Build | Vite, output to `dist/` | One JS + one CSS request instead of 8 files plus a CDN hit |
 | Deployment | GitHub Actions → Pages | Publishes `dist/` only, so the repo root is not served |
@@ -56,15 +58,16 @@ wind-station/
   .github/workflows/deploy.yml  test, build, publish dist/ to Pages
   lib/chart.js                  Chart.js + only the registrations used
   lib/parser.js                 CSV → rows
-  lib/stats.js                  time windows, circular means, Beaufort, units
+  lib/stats.js                  time windows, circular + rolling means, Beaufort, units
   lib/scale.js                  chart axis domains
   lib/drive.js                  Drive REST client
   lib/rose.js                   wind rose SVG
   sample/SsLog-19-08-2026.csv   REAL log from the device (211 rows, 105 min)
   sample/SsLog-18-08-2026.csv   SYNTHETIC stress day (1922 rows, generated)
-  test/parser.test.mjs          19 assertions
+  test/parser.test.mjs          25 assertions
+  test/scale.test.mjs           20 assertions
   test/stress.test.mjs          6 assertions
-  test/dom-smoke.mjs            35 assertions, jsdom + stubbed Chart.js/Drive
+  test/dom-smoke.mjs            58 assertions, jsdom + stubbed Chart.js/Drive
   test/make-stress-fixture.py   regenerates the synthetic day
   README.md                     setup and deployment
 ```
@@ -73,8 +76,8 @@ Verification status, all passing as of handover:
 
 ```bash
 npm install
-npm test                               # 41 assertions
-npm run test:dom                       # 35 assertions
+npm test                               # 51 assertions
+npm run test:dom                       # 58 assertions
 npm run build && npm run preview       # visual check of the real bundle
 ```
 
@@ -103,7 +106,7 @@ Do not "simplify" the parser without re-reading this list.
 | Trait | Example | Handling |
 |---|---|---|
 | Encoding is windows-1252 | `°` is one 0xB0 byte | `TextDecoder('windows-1252')` on an ArrayBuffer. `res.text()` assumes UTF-8 and mangles every degree sign |
-| Header repeats mid-file | at lines 1, 2, 5 | Skip *any* line starting `'Date` — one is written per device session |
+| Header repeats mid-file | at lines 1, 2, 5 | Skip *any* line starting `'Date` — one is written per device session. The next data row is marked `sessionStart` and dropped in `app.js` |
 | Column names have a leading apostrophe | `'Date, 'Time,` | Cosmetic, but don't match on `Date` alone |
 | No-data sentinel | `- - - - -` | → `null`, never `0`. Seen in SOG/COG on GPS dropout (13 of 211 rows) |
 | Dates are `dd/mm/yyyy` | `19/08/2026` | Parse explicitly. `new Date("08/09/2026")` is 8 Sept or 9 Aug depending on locale |
@@ -113,7 +116,8 @@ Do not "simplify" the parser without re-reading this list.
 | Sampling is irregular | 17–33 s, mostly 28–32 | **Every rolling stat must use a time window, never a row count** |
 | Trailing comma | 11 fields, last always empty | Comment column is always empty in observed data |
 
-Fixture facts for the real file (`SsLog-19-08-2026.csv`): 211 data rows,
+Fixture facts for the real file (`SsLog-19-08-2026.csv`): 211 data rows (2 of
+them marked `sessionStart`, so 209 reach the display),
 3 header lines skipped, 1 blank, 13 sentinel rows, span 10:18:02–12:03:01 UTC,
 TWS 7.3–11.2 kn, TWD 296°–339° M, station at 38.3180° N 26.6950° E.
 A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
@@ -122,21 +126,30 @@ A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
 
 ## 5. Design invariants — do not break these
 
-1. **Direction is never a line chart.** 359° → 002° is a 3° shift; a line draws
-   it as a full-scale cliff. Samples are plotted as points.
-   Aggregation goes to the wind rose.
+1. **Raw direction samples are never joined by a line.** 359° → 002° is a 3°
+   shift; a line through raw samples draws it as a full-scale cliff. Samples are
+   plotted as points. Aggregation goes to the wind rose.
    The *axis* is continuous, though: points are unwrapped to within half a turn
    of the last 15-minute vector mean (`lib/scale.js`), so a northerly reads as
    one band instead of splitting across the top and bottom edges. Tick labels
    normalise back to 0–359.
+   The **5-minute vector mean** *is* drawn as a line over those points, and this
+   does not reopen the rule. It rides the same unwrapped, folded axis as the
+   dots, and `breakWraps` (`lib/scale.js`) inserts a null wherever two adjacent
+   values land on opposite edges — reachable only on the full-turn axis. No
+   cliff is ever rendered. If you touch that pipeline, keep the mean series the
+   same length as the sample series: `syncTo` cross-highlights the two charts by
+   position.
 2. **Circular means use unit vectors.** Arithmetic mean of 350° and 010° is
    180° — exactly backwards. See `vectorMeanDeg` in `lib/stats.js`.
 3. **"Max", not "gust".** At 30 s sampling these are instantaneous samples, not
    the 3-second peak "gust" means meteorologically. The footer says so.
-4. **The dial smooths, the chart does not.** Hero shows a 5-minute vector mean
-   of direction; the chart plots every sample. On the real fixture these read
-   334° and 327° respectively. This divergence is disclosed in the footer —
-   if you change the smoothing, update that text.
+4. **The dial and the chart's mean line smooth identically.** Both read
+   `SMOOTH_MINUTES` (5) from `lib/stats.js` — the dial via `summarise()`, the
+   chart via `rollingVectorMeanDeg()` — so the right-hand end of the line is the
+   number under the dial (334° on the real fixture, where the last raw sample is
+   327°). Change the constant and both move together; the footer states the
+   window, so update that text too.
 5. **Offline is a first-class state.** Over 15 min stale → dial greys out, pill
    reads "offline since HH:MM". A confident reading from yesterday is worse
    than no reading. States: live (<2 min), delayed (2–15 min), offline (>15 min),
@@ -145,13 +158,19 @@ A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
    `drive.google.com/uc?export=download` does not and fails silently from a page.
 7. **Sort Drive files by `modifiedTime`, never filename.** Survives midnight
    rollover, re-uploads and backfilled days.
-8. **Only stationary rows reach the display.** `ingest` in `app.js` passes every
-   parsed row through `mooredRows` (`lib/stats.js`) before anything else sees it,
+8. **Only stationary rows, and no startup rows, reach the display.** `ingest` in
+   `app.js` first drops rows the parser marked `sessionStart` — the device writes
+   a header whenever it opens a log, and the row after it is the instrument
+   warming up — then passes the rest through `mooredRows` (`lib/stats.js`) before
+   anything else sees it,
    so the tiles, charts, rose and station marker are all built from readings
    taken at the mooring. A missing SOG is kept — the sentinel means a GPS
    dropout, not motion. The threshold is `CONFIG.maxSogKnots`; the CSV download
    still serves the untouched file. Filter here and nowhere else: the parser
-   stays a pure CSV reader, and the footer discloses the count it dropped.
+   stays a pure CSV reader — it *marks* `sessionStart` rather than dropping,
+   because it is the only thing that sees the file's original order before the
+   sort — and the footer discloses both counts. Order matters: startup rows go
+   first, so an under-way warm-up row is not counted twice.
 
 ---
 

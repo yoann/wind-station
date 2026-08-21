@@ -81,7 +81,9 @@ Encoding **windows-1252**. CRLF line endings. Delimiter is comma-space. Trailing
    `res.text()` assumes UTF-8 and mangles every `°`.
 2. **Skip repeated headers.** The header recurs mid-file (observed at lines 1, 2 and 5) — the
    device writes one per session. Skip *any* line whose trimmed form starts with `'Date`. Note
-   the leading apostrophe on column names.
+   the leading apostrophe on column names. Mark the next data row `sessionStart`: it is the
+   instrument warming up, and `app.js` drops it before anything else sees it. Consecutive
+   headers mark one row, not two.
 3. **Skip blank lines**, including the trailing one.
 4. **Split on `,`, trim each field.** Expect 11.
 5. **Timestamp.** Date is `dd/mm/yyyy`; time is `HH:MM:SS UTC`. Parse explicitly into
@@ -111,7 +113,8 @@ timestamps, never a row count.** "Last 15 minutes" is not "the last 30 rows".
 | Mean (15 min) | Arithmetic mean of TWS in the time window |
 | Max (15 min) | Max TWS in window — **label "max", not "gust"** |
 | Trend | mean(last 15 min) − mean(previous 15 min), shown as ±kn |
-| Direction now | Vector mean of last 5 min |
+| Direction now | Vector mean of last 5 min (`SMOOTH_MINUTES`) |
+| Direction mean line | Trailing vector mean over `SMOOTH_MINUTES`, one value per sample, overlaid on the direction chart |
 | Veer / back | Signed circular difference: vector mean now vs 15 min ago. >0 veering, <0 backing |
 | Beaufort | Standard knots→force bands, with descriptor ("fresh breeze, force 5") |
 | Cardinal | 16-point from magnetic degrees, suffixed `M` |
@@ -135,17 +138,29 @@ Single page, single column on mobile, max ~900 px on desktop. Order top to botto
 3. **Secondary tiles** (2×2) — max 15 min, mean 15 min, trend, veer/back. The window is
    `SUMMARY_MINUTES` in `lib/stats.js` (`TREND_MINUTES` / `SHIFT_MINUTES` for the other
    two); every tile label is generated from those constants.
-4. **Charts** — TWS line over the day; TWD below it as *dots*, sharing one x-axis and one
-   crosshair. Both y-axes are cut to the day's data rather than to a fixed range.
+4. **Charts** — TWS line over the day; TWD below it as *dots* with a 5-minute vector
+   mean line over them, sharing one x-axis and one crosshair. Both y-axes are cut to the
+   day's data rather than to a fixed range.
 5. **Wind rose** — 16 sectors × Beaufort bins, computed client-side from the day's rows.
 6. **Day picker + CSV download** — lazy: fetches one day's file on demand. Do not attempt
    multi-day ranges without a backend.
 7. **Footer** — magnetic-direction note, sampling interval, data source.
 
-### Direction is never a line chart
+### Raw direction samples are never joined by a line
 
 359° → 002° is a 3° shift but plots as a 357° cliff. Dots avoid the artifact entirely; a
 steady breeze still reads as a flat band. Aggregation goes to the rose.
+
+The one line on that chart is the **5-minute vector mean**, drawn over dots deliberately
+lightened (`--accent-soft`) so the spread stays visible behind the trend. It is safe
+because it rides the same unwrapped, folded axis as the dots, and `breakWraps`
+(`lib/scale.js`) cuts it with a null wherever a fold would put adjacent values on
+opposite edges — only reachable on the full-turn axis. The cliff is never drawn.
+
+Five minutes because it damps sampling jitter while preserving the 8–12 minute
+oscillations a sailor reads a direction trace for; 10 or 15 would average those away.
+It is `SMOOTH_MINUTES` in `lib/stats.js`, shared with the dial, so the right-hand end
+of the line is the number in the hero.
 
 ### Axes are cut to the data, not to the instrument
 

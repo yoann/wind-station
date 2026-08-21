@@ -86,18 +86,22 @@ The parser handles these, all observed in real files:
 
 ## Design notes worth keeping
 
-- **Direction is never a line chart.** 359° → 002° is a 3° shift; a line draws
-  it as a full-scale cliff. Individual samples are plotted as points, and
-  aggregation goes to the wind rose.
+- **Direction samples are never joined by a line.** 359° → 002° is a 3° shift;
+  a line through raw samples draws it as a full-scale cliff. Individual samples
+  are plotted as points, and aggregation goes to the wind rose. The one line on
+  that chart is the 5-minute vector mean, which is safe because it rides the
+  unwrapped axis and is broken with a gap wherever a fold would draw a cliff
+  (`breakWraps` in `lib/scale.js`).
 - **Both chart axes are cut to the data.** Min and max come from the day's
   samples plus a margin, over a minimum span so a flat stretch does not zoom
   into sampling noise. Direction is centred on the last 15-minute vector mean
   and unwrapped around it, keeping a northerly in one band. See `lib/scale.js`.
 - **Circular means use vectors.** The arithmetic mean of 350° and 010° is 180°,
   pointing exactly backwards. `vectorMeanDeg` averages unit vectors instead.
-- **The dial smooths, the chart does not.** The hero shows a 5-minute vector
-  mean of direction to damp jitter; the chart plots every sample. This is
-  disclosed in the page footer.
+- **The dial and the chart's mean line smooth identically.** Both use
+  `SMOOTH_MINUTES` (5) from `lib/stats.js`, so the right-hand end of the line is
+  the number under the dial. The dots behind it are still every raw sample.
+  This is disclosed in the page footer.
 - **"Max", not "gust".** At 30 s sampling these are instantaneous samples, not
   the 3-second peak that "gust" means meteorologically.
 - **Offline is a first-class state.** Over 15 minutes stale, the dial greys out
@@ -109,6 +113,12 @@ The parser handles these, all observed in real files:
   never reach the tiles, charts, rose or station marker; the footer says how
   many were dropped, and the CSV download still serves the untouched file. A
   missing SOG is kept — that sentinel means a GPS dropout, not motion.
+- **The first reading of each session is dropped.** The device writes a fresh
+  header line every time it opens a log, and the row that follows is the
+  instrument starting up. The parser only *marks* those rows (`sessionStart`) —
+  it is the one place that knows the file's original order, since rows are
+  sorted by timestamp before they leave it — and `ingest` in `app.js` drops
+  them, before the under-way filter so the two counts stay honest.
 
 ## Tests
 
