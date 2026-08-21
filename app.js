@@ -1,5 +1,5 @@
 import { CONFIG } from './config.js';
-import { parseLog, decodeLog, dateFromFilename } from './lib/parser.js';
+import { parseLog, decodeLog, dateFromFilename, parseFirstFix } from './lib/parser.js';
 import {
   summarise, freshness, formatAge, formatSpeed, UNITS, cardinal16, MINUTE, SUMMARY_MINUTES,
   TREND_MINUTES, SHIFT_MINUTES, SMOOTH_MINUTES,
@@ -8,7 +8,8 @@ import {
 import {
   paddedRange, directionRange, unwrapDeg, foldInto, normDeg, breakWraps,
 } from './lib/scale.js';
-import { fetchLatestMeta, listFiles, fetchFileBytes, describeError } from './lib/drive.js';
+import { fetchLatestMeta, listFiles, fetchFileBytes, fetchFileHead, describeError } from './lib/drive.js';
+import { reverseGeocode, localityOf } from './lib/geocode.js';
 import { renderRose, renderRoseLegend } from './lib/rose.js';
 import { Chart } from './lib/chart.js';
 
@@ -41,6 +42,8 @@ const state = {
   viewingDay: '',       // '' = follow latest, otherwise a file id
   error: null,
   backoff: 0,
+  places: new Map(),    // file id -> place name, or null once looked up in vain
+  dayFiles: [],         // whatever the picker is currently showing
 };
 
 const el = (id) => document.getElementById(id);
@@ -64,7 +67,7 @@ const unitLabel = () => UNITS[state.unit].label;
 
 function boot() {
   el('station-name').textContent = CONFIG.stationName;
-  if (CONFIG.placeName) el('place-name').textContent = CONFIG.placeName;
+  renderPlace();
   document.title = CONFIG.stationName;
 
   // Labels come from the constant so they cannot drift from the window.
@@ -150,6 +153,7 @@ async function load({ force = false } = {}) {
       state.error = null;
       render();
       populateDayOptions(DEMO_FILES);
+      resolvePlaces(DEMO_FILES);
       return;
     }
 
@@ -200,6 +204,7 @@ function ingest(bytes, meta) {
   const fixed = state.rows.find((r) => r.lat !== null && r.lon !== null);
   state.station = fixed ? { lat: fixed.lat, lon: fixed.lon } : station;
   state.fileMeta = meta;
+  resolvePlaceFor(meta, state.station);
 }
 
 function scheduleNext() {
@@ -211,15 +216,30 @@ function scheduleNext() {
 }
 
 function populateDayOptions(files) {
+  state.dayFiles = files;
   const select = el('day-select');
   const current = select.value;
+
+  // Tagging every option with the same place is noise — the masthead already
+  // says where we are. The place only earns its space when the folder spans
+  // more than one, which is exactly when the date alone is ambiguous.
+  const known = files.map((f) => localityOf(state.places.get(f.id))).filter(Boolean);
+  const showPlace = new Set(known).size > 1;
+
   select.replaceChildren(new Option('Latest', ''));
   for (const f of files) {
     const d = dateFromFilename(f.name);
-    const label = d ? dateFmt.format(new Date(Date.UTC(d.y, d.m - 1, d.d))) : f.name;
+    let label = d ? dateFmt.format(new Date(Date.UTC(d.y, d.m - 1, d.d))) : f.name;
+    const place = showPlace ? localityOf(state.places.get(f.id)) : null;
+    if (place) label += ` \u2014 ${place}`;
     select.append(new Option(label, f.id));
   }
   select.value = current;
+}
+
+/** Repaint the picker in place — used when a place name arrives late. */
+function repaintDayOptions() {
+  if (state.dayFiles.length) populateDayOptions(state.dayFiles);
 }
 
 async function refreshDayIndex() {
@@ -230,6 +250,7 @@ async function refreshDayIndex() {
     state.fileIndex = files;
     state.indexFetchedAt = Date.now();
     populateDayOptions(files);
+    resolvePlaces(files);
   } catch { /* the picker is optional; never let it break the live view */ }
 }
 
@@ -241,6 +262,124 @@ function downloadCsv() {
   a.download = state.fileMeta?.name || 'wind-log.csv';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* -- location -------------------------------------------------------------- */
+
+// The place under the title is derived from each log's own GPS fix, so a boat
+// that moves between regattas labels itself. CONFIG.placeName is the fallback
+// for a lookup that is pending, disabled, or came back with nothing.
+//
+// Labelling the *picker* needs a fix from files we have not downloaded, so each
+// one is probed with a 2 KB Range request and the answer is remembered by file
+// id — a day is probed once, ever. All of this is cosmetic: every path below
+// swallows its errors rather than let a missing place name reach the wind data.
+
+const FIX_KEY = 'wind-station.fix.v1';
+const FIX_LIMIT = 400;
+const HEAD_BYTES = 2048;
+const PLACE_WORKERS = 2;
+
+// Guards a file already being probed, so overlapping index refreshes cannot
+// double up on the same Range request.
+const probing = new Set();
+
+function loadFixes() {
+  try {
+    const raw = localStorage.getItem(FIX_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveFix(id, fix) {
+  try {
+    const all = loadFixes();
+    all[id] = fix;
+    const keys = Object.keys(all);
+    // One file per day, so this only bites after a year of use.
+    const kept = keys.length > FIX_LIMIT ? keys.slice(keys.length - FIX_LIMIT) : keys;
+    localStorage.setItem(FIX_KEY, JSON.stringify(Object.fromEntries(kept.map((k) => [k, all[k]]))));
+  } catch { /* private mode or quota — the fix is still good for this session */ }
+}
+
+function currentPlace() {
+  const id = state.fileMeta?.id;
+  return (id && state.places.get(id)) || null;
+}
+
+function renderPlace() {
+  const place = currentPlace() || CONFIG.placeName || '';
+  el('place-name').textContent = place;
+}
+
+/** First bytes of a file, enough to reach its opening fix. */
+async function headBytes(file) {
+  if (DEMO) {
+    const res = await fetch(file.id, { headers: { Range: `bytes=0-${HEAD_BYTES - 1}` } });
+    if (!res.ok) throw new Error('sample file missing');
+    return res.arrayBuffer();
+  }
+  return fetchFileHead(file.id, CONFIG.apiKey, HEAD_BYTES);
+}
+
+/** The fix for a file, from cache, or probed with a Range request. */
+async function fixFor(file) {
+  const cached = loadFixes()[file.id];
+  if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lon)) return cached;
+  const fix = parseFirstFix(decodeLog(await headBytes(file)));
+  if (fix) saveFix(file.id, fix);
+  return fix;
+}
+
+/**
+ * Place for the file on screen. Its fix is already parsed, so this costs no
+ * download — only the geocode, which is usually a cache hit.
+ */
+async function resolvePlaceFor(meta, station) {
+  // Repaint first, before any await: the file on screen has just changed, and
+  // leaving the previous day's place above it would assert a location this log
+  // was never recorded at. Falls back to CONFIG.placeName until the name lands.
+  renderPlace();
+  if (!CONFIG.geocode?.enabled || !meta || !station) return;
+  if (state.places.has(meta.id)) return;
+
+  saveFix(meta.id, station);
+  const place = await reverseGeocode(station.lat, station.lon, CONFIG.geocode);
+  state.places.set(meta.id, place);
+  renderPlace();
+  renderFooter();
+  repaintDayOptions();
+}
+
+/**
+ * Places for every file in the picker, in the background, repainting labels as
+ * they land. Files that fail are left unresolved so the next index refresh can
+ * retry them; that refresh is throttled to 10 minutes, which bounds the retries.
+ */
+async function resolvePlaces(files) {
+  if (!CONFIG.geocode?.enabled) return;
+  const pending = files.filter((f) => !state.places.has(f.id) && !probing.has(f.id));
+  if (!pending.length) return;
+  for (const f of pending) probing.add(f.id);
+
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < pending.length) {
+      const file = pending[cursor++];
+      try {
+        const fix = await fixFor(file);
+        const place = fix ? await reverseGeocode(fix.lat, fix.lon, CONFIG.geocode) : null;
+        state.places.set(file.id, place);
+        repaintDayOptions();
+        if (file.id === state.fileMeta?.id) { renderPlace(); renderFooter(); }
+      } catch { /* leave unresolved: the label is optional, the wind data is not */ }
+      probing.delete(file.id);
+    }
+  };
+  await Promise.all(Array.from({ length: PLACE_WORKERS }, worker));
 }
 
 /* -- rendering ------------------------------------------------------------ */
@@ -351,6 +490,8 @@ function renderFooter() {
   if (state.rows.length) bits.push(`${state.rows.length} samples`);
   if (state.excluded) bits.push(`${state.excluded} excluded, vessel under way`);
   if (state.warmup) bits.push(`${state.warmup} dropped at startup`);
+  const place = currentPlace();
+  if (place) bits.push(place);
   if (state.station) {
     bits.push(`${state.station.lat.toFixed(4)}\u00B0, ${state.station.lon.toFixed(4)}\u00B0`);
   }

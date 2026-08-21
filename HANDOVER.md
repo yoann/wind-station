@@ -31,6 +31,7 @@ fixed unless the user reopens them.
 | Infrastructure | Static hosting only, no backend | Forces browser-side Drive reads; rules out precomputed rollups |
 | Direction reference | **Magnetic**, uncorrected | The log emits `306° M`. No WMM conversion. Labelled `M` everywhere |
 | Position | Fixed marker, footer only | Vessel is moored (~13 m of drift). No map, no live position broadcast |
+| Place name | Reverse-geocoded from each file's own fix | The vessel moves between regattas, so a configured place is wrong half the season. `placeName` is the fallback |
 | Columns used | Date, Time, TWS, TWD | SOG/COG/TWA dropped from display, kept in the CSV download |
 | Under-way rows | Excluded above `CONFIG.maxSogKnots` (2 kn) | The boat is a race committee vessel; rows logged while it moves are boat-motion readings from elsewhere. Null SOG is kept |
 | Startup rows | First data row after every header dropped | The device writes a header per logging session; the reading that follows is the instrument warming up. 2 of 211 on the real fixture |
@@ -62,12 +63,14 @@ wind-station/
   lib/scale.js                  chart axis domains
   lib/drive.js                  Drive REST client
   lib/rose.js                   wind rose SVG
+  lib/geocode.js                GPS fix → place name (cached, throttled)
   sample/SsLog-19-08-2026.csv   REAL log from the device (211 rows, 105 min)
   sample/SsLog-18-08-2026.csv   SYNTHETIC stress day (1922 rows, generated)
-  test/parser.test.mjs          25 assertions
+  test/geocode.test.mjs         20 assertions
+  test/parser.test.mjs          30 assertions
   test/scale.test.mjs           20 assertions
   test/stress.test.mjs          6 assertions
-  test/dom-smoke.mjs            58 assertions, jsdom + stubbed Chart.js/Drive
+  test/dom-smoke.mjs            69 assertions, jsdom + stubbed Chart.js/Drive/Nominatim
   test/make-stress-fixture.py   regenerates the synthetic day
   README.md                     setup and deployment
 ```
@@ -172,6 +175,16 @@ A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
    sort — and the footer discloses both counts. Order matters: startup rows go
    first, so an under-way warm-up row is not counted twice.
 
+9. **The place name is derived, never assumed.** It comes from the loaded file's
+   own GPS fix (`lib/geocode.js`), because the vessel moves between regattas and
+   a configured place would be wrong half the season. Two rules follow. First,
+   `renderPlace()` runs *before* any await in `resolvePlaceFor` — when the day
+   changes, the previous day's place must leave the screen immediately rather
+   than sit above a log recorded 200 miles away. Second, every path in that
+   module swallows its errors: a place name is cosmetic and must never be able
+   to keep the wind data off the screen. `CONFIG.placeName` is the fallback for
+   pending, disabled, failed and open-water lookups alike.
+
 ---
 
 ## 6. Next tasks, in order
@@ -202,7 +215,9 @@ A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
   speed bins, the unit converter) depends on it.
 - **Does the device log true gusts** in another mode? If so, prefer that over
   the 30-second maximum.
-- **Station display name** and place label for `config.js` (currently generic).
+- **Station display name** for `config.js` (currently generic). The place label
+  no longer needs deciding: it is derived from each file's own GPS fix, and
+  `placeName` is only the fallback.
 - **Domain**, needed for the API-key referrer restriction.
 
 ---

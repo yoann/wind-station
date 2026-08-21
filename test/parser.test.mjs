@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseLogBytes, parseTimestamp, parseDegMin, parseBearing, parseNumber, dateFromFilename } from '../lib/parser.js';
+import { parseLogBytes, parseTimestamp, parseDegMin, parseBearing, parseNumber, dateFromFilename, parseFirstFix, decodeLog } from '../lib/parser.js';
 import { vectorMeanDeg, circularDiff, beaufort, cardinal16, summarise, windowRows, formatSpeed, mooredRows, rollingVectorMeanDeg } from '../lib/stats.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -114,6 +114,47 @@ test('summary over the fixture', () => {
   assert.equal(s.sampleCount, 211);
   assert.ok(s.maxRecent >= s.meanRecent);
   assert.ok(s.shift !== null);
+});
+
+test('first fix comes from the head of the real file', () => {
+  // What a 2 KB Range request would hand us: a header, a few rows, and a
+  // final line cut in half.
+  const head = decodeLog(bytes.subarray(0, 300));
+  const fix = parseFirstFix(head);
+  assert.ok(Math.abs(fix.lat - 38.318) < 1e-6, `lat ${fix.lat}`);
+  assert.ok(Math.abs(fix.lon - 26.6949) < 1e-3, `lon ${fix.lon}`);
+});
+
+test('first fix skips repeated headers', () => {
+  const text = [
+    "'Date, 'Time, 'Latitude, 'Longitude, 'SOG, 'COG, 'TWS, 'TWA, 'TWD, 'Comment, ",
+    "'Date, 'Time, 'Latitude, 'Longitude, 'SOG, 'COG, 'TWS, 'TWA, 'TWD, 'Comment, ",
+    '',
+    "19/08/2026, 10:18:02 UTC, 38\u00B0 19.080' N, 026\u00B0 41.698' E, 00.1, 355\u00B0 M, 08.4, 026\u00B0 Port, 306\u00B0 M, , ",
+    '',
+  ].join('\r\n');
+  assert.deepEqual(parseFirstFix(text), { lat: 38.318, lon: 26 + 41.698 / 60 });
+});
+
+test('first fix ignores a line the byte range cut in half', () => {
+  // The truncated row's longitude is a fragment; trusting it would put the
+  // station a degree away from where it is.
+  const text = "19/08/2026, 10:18:02 UTC, 38\u00B0 19.080' N, 026\u00B0 4";
+  assert.equal(parseFirstFix(text), null);
+});
+
+test('first fix skips rows whose position is the null sentinel', () => {
+  const text = [
+    "18/08/2026, 06:00:00 UTC, - - - - -, - - - - -, 00.2, 356\u00B0 M, 02.7, 051\u00B0 Port, 040\u00B0 M, , ",
+    "18/08/2026, 06:00:30 UTC, 38\u00B0 19.080' N, 026\u00B0 41.698' E, 00.2, 356\u00B0 M, 02.7, 051\u00B0 Port, 040\u00B0 M, , ",
+    '',
+  ].join('\r\n');
+  assert.deepEqual(parseFirstFix(text), { lat: 38.318, lon: 26 + 41.698 / 60 });
+});
+
+test('first fix of a headerless or positionless head is null', () => {
+  assert.equal(parseFirstFix(''), null);
+  assert.equal(parseFirstFix("'Date, 'Time, 'Latitude, 'Longitude,\r\n"), null);
 });
 
 test('filename date is dd-mm-yyyy', () => {

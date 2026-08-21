@@ -11,6 +11,7 @@ Static, public, live-first page reading one-file-per-day CSV logs from a Google 
 | Infrastructure | Static hosting only, no backend |
 | Direction reference | **Magnetic**, as logged. No WMM conversion. |
 | Position | Fixed marker, station is moored. No live track. |
+| Place name | **Derived per file** from its GPS fix, not configured. See § Location. |
 | Source folder | Drive `12Sn5_2YPEmH2ZzxTXy9Fcy8M6MZGi8Qr` ("Wind_data") |
 
 Because directions stay magnetic, every direction readout on the page carries an `M` suffix
@@ -221,10 +222,38 @@ Test with synthetic data at 35 kn gusting and with a six-hour-old file. A layout
 
 ---
 
+## 7a. Location
+
+The vessel is a race committee boat: it moves between regattas, so the place is a property of
+each **file**, not of the site. Every row already carries a GPS fix, so the file states where it
+was recorded. A configured place would be silently wrong for half a season.
+
+- `CONFIG.placeName` is demoted to a **fallback** — shown while a lookup is pending, when
+  `geocode.enabled` is false, and when the fix resolves to nothing.
+- Reverse geocoding goes to OpenStreetMap Nominatim at `zoom=14`. Verified against the real
+  station fix: 14 returns `town: Urla`, while 12 and below only reach `province: İzmir`. The
+  locality preference puts `town` above `suburb` — the same fix also returns `suburb: İçmeler`,
+  which is finer than a sailor would name the place.
+- **A fix over open water returns `{"error": "Unable to geocode"}` with HTTP 200.** This is
+  normal, not a failure, and is cached as a miss so it is not re-asked every reload.
+- Caching is what makes this viable at a station's scale: answers are keyed to the fix rounded
+  to ~100 m, so ~13 m of mooring swing never costs a second request, and a season in one bay
+  costs one. Requests are serialised at one per second, Nominatim's stated policy.
+- To label days that were never downloaded, each file is probed once with `Range: bytes=0-2047`
+  and `parseFirstFix` reads the opening fix out of the fragment. The last line of such a
+  fragment is discarded — a half-written coordinate would place the station a degree away.
+- The picker appends a place **only when the folder spans more than one**. Otherwise the date
+  alone is unambiguous and the masthead already says where.
+- Every path here is best-effort and swallows its errors. A place name is cosmetic; it must
+  never be able to keep the wind data off the screen.
+
+---
+
 ## 8. Open items
 
 - **TWS units** — assumed knots. Confirm against the device manual.
 - **Does the device log gusts separately?** If a gust column exists in another log mode, it is
   worth enabling; the 30 s max is a weaker substitute.
-- **Station display name** and the place label for the fixed marker.
+- **Station display name**. (The place label is settled: derived per file from
+  its GPS fix — see § Location.)
 - **Domain** for the referrer restriction on the API key.

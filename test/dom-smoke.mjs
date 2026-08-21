@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
@@ -31,18 +32,57 @@ window.Chart = ChartStub;
 // live path, not demo mode — the stub has to answer files.list and alt=media
 // the way Drive does. File ids are the sample filenames so a failure names the
 // day it came from. Newest first: the 19th is the real 211-row log.
+// Two more days, synthesised at other positions, because the two real samples
+// sit at the same anchorage and so cannot show the picker naming places apart.
+// A log body just needs a header and a couple of rows to parse and geocode.
+const syntheticDay = (date, lat, lon) => [
+  "'Date, 'Time, 'Latitude, 'Longitude, 'SOG, 'COG, 'TWS, 'TWA, 'TWD, 'Comment, ",
+  `${date}, 09:00:00 UTC, ${lat}, ${lon}, 00.1, 355\xB0 M, 09.0, 026\xB0 Port, 300\xB0 M, , `,
+  `${date}, 09:00:30 UTC, ${lat}, ${lon}, 00.1, 355\xB0 M, 09.2, 026\xB0 Port, 301\xB0 M, , `,
+  `${date}, 09:01:00 UTC, ${lat}, ${lon}, 00.1, 355\xB0 M, 09.1, 026\xB0 Port, 302\xB0 M, , `,
+  '',
+].join('\r\n');
+
+const SYNTHETIC = {
+  // Bodrum — a different regatta, so this day must be labelled apart.
+  'drv-SsLog-17-08-2026.csv': syntheticDay('17/08/2026', "37\xB0 01.800' N", "027\xB0 25.800' E"),
+  // Open sea — nothing to name, so this day must fall back to CONFIG.placeName.
+  'drv-SsLog-16-08-2026.csv': syntheticDay('16/08/2026', "36\xB0 00.000' N", "023\xB0 00.000' E"),
+};
+
 const DRIVE_FILES = [
   { id: 'drv-SsLog-19-08-2026.csv', name: 'SsLog-19-08-2026.csv', modifiedTime: '2026-08-19T14:05:00.000Z', size: '21441' },
   { id: 'drv-SsLog-18-08-2026.csv', name: 'SsLog-18-08-2026.csv', modifiedTime: '2026-08-18T23:59:00.000Z', size: '193324' },
+  { id: 'drv-SsLog-17-08-2026.csv', name: 'SsLog-17-08-2026.csv', modifiedTime: '2026-08-17T18:00:00.000Z', size: '400' },
+  { id: 'drv-SsLog-16-08-2026.csv', name: 'SsLog-16-08-2026.csv', modifiedTime: '2026-08-16T18:00:00.000Z', size: '400' },
 ];
 
-const sampleBody = (name) => {
-  const buf = readFileSync(`${APP}/sample/${name}`);
-  return { ok: true, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) };
-};
+const bodyOf = (buf) => ({
+  ok: true,
+  arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+});
+const sampleBody = (name) => bodyOf(readFileSync(`${APP}/sample/${name}`));
 
-window.fetch = async (url) => {
+// Stub Nominatim. Deliberately answers a name that is NOT CONFIG.placeName, so
+// a masthead reading 'Zeytineli' proves the place came from the GPS fix and not
+// from config. Open water geocodes to nothing, as it really does.
+const GAZETTEER = [
+  { lat: 38.318, lon: 26.695, address: { village: 'Zeytineli', country: 'T\u00FCrkiye' } },
+  { lat: 37.030, lon: 27.430, address: { town: 'Bodrum', country: 'T\u00FCrkiye' } },
+];
+const geocodeCalls = [];
+const rangeRequests = [];
+
+window.fetch = async (url, options) => {
   const u = new URL(String(url), 'https://example.org/');
+
+  if (u.hostname === 'nominatim.openstreetmap.org') {
+    const lat = Number(u.searchParams.get('lat'));
+    const lon = Number(u.searchParams.get('lon'));
+    geocodeCalls.push(`${lat},${lon}`);
+    const hit = GAZETTEER.find((p) => Math.abs(p.lat - lat) < 0.05 && Math.abs(p.lon - lon) < 0.05);
+    return { ok: true, json: async () => (hit ? { address: hit.address } : { error: 'Unable to geocode' }) };
+  }
 
   // files.list — honours pageSize, already sorted newest-first
   if (u.pathname === '/drive/v3/files') {
@@ -53,8 +93,14 @@ window.fetch = async (url) => {
 
   // files/{id}?alt=media
   const id = decodeURIComponent(u.pathname.split('/').pop());
+  const range = options?.headers?.Range;
+  if (range) rangeRequests.push(id);
   const meta = DRIVE_FILES.find((f) => f.id === id);
-  if (meta && u.searchParams.get('alt') === 'media') return sampleBody(meta.name);
+  if (meta && u.searchParams.get('alt') === 'media') {
+    // Drive honours Range; serving the whole file is a superset the parser
+    // handles, and the header itself is asserted below.
+    return SYNTHETIC[id] ? bodyOf(Buffer.from(SYNTHETIC[id], 'latin1')) : sampleBody(meta.name);
+  }
 
   // Demo mode still works if the API key is ever cleared from config.js
   if (/^SsLog-.*\.csv$/.test(id)) return sampleBody(id);
@@ -83,6 +129,17 @@ const fails = [];
 const check = (name, cond, detail = '') => {
   if (cond) console.log(`  ok   ${name}${detail ? ' — ' + detail : ''}`);
   else { console.log(`  FAIL ${name}${detail ? ' — ' + detail : ''}`); fails.push(name); }
+};
+
+// Place lookups are throttled to one a second, so they land well after the
+// initial render. Poll rather than guess a sleep long enough to cover them.
+const waitFor = async (cond, ms = 6000) => {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (cond()) return true;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return false;
 };
 
 console.log('\nDOM smoke test (live Drive path, stubbed):');
@@ -185,12 +242,55 @@ $('day-select').value = 'drv-SsLog-18-08-2026.csv';
 $('day-select').dispatchEvent(new window.Event('change'));
 await new Promise((r) => setTimeout(r, 400));
 console.log('\nAfter switching to the synthetic gale day:');
-check('day picker offers both sample days', $('day-select').options.length === 3, `${$('day-select').options.length} options`);
+check('day picker offers every day in the folder', $('day-select').options.length === 5, `${$('day-select').options.length} options`);
 check('back-to-live button revealed', !$('back-to-live').hidden);
 check('history mode in status pill', $('status-text').textContent === 'Viewing history', $('status-text').textContent);
 check('rose fans across many sectors', $('rose').querySelectorAll('path.rose-seg').length > 30, `${$('rose').querySelectorAll('path.rose-seg').length} segments`);
 check('gale-force max recorded', parseFloat($('stat-max').textContent) > 0, $('stat-max').textContent);
 check('speed series loaded the bigger day', charts.at(-2).data.datasets[0].data.length > 1500, `${charts.at(-2).data.datasets[0].data.length} points`);
+
+// Location derived from the GPS fixes
+const named = await waitFor(() => $('place-name').textContent === 'Zeytineli, T\u00FCrkiye');
+console.log('\nLocation derived from the GPS fix:');
+check('masthead names the place the coordinates are in, not CONFIG.placeName',
+  named, `got "${$('place-name').textContent}"`);
+check('footer names the place beside the coordinates',
+  /Zeytineli, T\u00FCrkiye \u00B7 38\.3180\u00B0/.test($('footer-meta').textContent), $('footer-meta').textContent);
+
+const labelled = await waitFor(() => /Bodrum/.test($('day-select').textContent));
+check('picker names the day logged at another anchorage', labelled,
+  [...$('day-select').options].map((o) => o.text).join(' | '));
+check('picker keeps the date as the primary label',
+  /^Mon 17 Aug \u2014 Bodrum$/.test([...$('day-select').options].find((o) => /Bodrum/.test(o.text))?.text ?? ''),
+  [...$('day-select').options].map((o) => o.text).join(' | '));
+check('a day the gazetteer cannot name keeps its bare date',
+  [...$('day-select').options].some((o) => o.text === 'Sun 16 Aug'),
+  [...$('day-select').options].map((o) => o.text).join(' | '));
+
+// The two real samples share an anchorage, so the folder must cost one lookup
+// for them, not one per file — that is what makes labelling a season viable.
+await waitFor(() => geocodeCalls.length >= 3);
+check('one lookup per place, not per file', geocodeCalls.length === 3, geocodeCalls.join(' | '));
+check('unseen days are probed with a Range request, not downloaded whole',
+  rangeRequests.includes('drv-SsLog-17-08-2026.csv') && rangeRequests.includes('drv-SsLog-16-08-2026.csv'),
+  rangeRequests.join(' | '));
+check('the loaded day is never probed — its fix is already parsed',
+  !rangeRequests.includes('drv-SsLog-19-08-2026.csv'), rangeRequests.join(' | '));
+
+// A fix over open water geocodes to nothing. The page must still render, with
+// the configured place as the fallback — this is the regression that matters.
+$('day-select').value = 'drv-SsLog-16-08-2026.csv';
+$('day-select').dispatchEvent(new window.Event('change'));
+await new Promise((r) => setTimeout(r, 300));
+console.log('\nAfter switching to a day logged over open water:');
+// Not a waitFor: the fallback must be on screen the moment the day changes,
+// never a stale name inherited from the day before it.
+check('masthead falls back to CONFIG.placeName when nothing can be named',
+  $('place-name').textContent === 'Urla, T\u00FCrkiye', `got "${$('place-name').textContent}"`);
+check('footer omits the place but keeps the coordinates',
+  !/Urla/.test($('footer-meta').textContent) && /36\.0000\u00B0/.test($('footer-meta').textContent),
+  $('footer-meta').textContent);
+check('the day still renders its readings', $('dial-speed').textContent !== '--', $('dial-speed').textContent);
 
 console.log(fails.length ? `\n${fails.length} failing\n` : '\nall passing\n');
 process.exit(fails.length ? 1 : 0);

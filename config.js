@@ -11,7 +11,10 @@ export const CONFIG = {
   apiKey: 'AIzaSyAAdtZRjeeHO73HJw_lcJvnTWsDzx13BIo',
 
   stationName: 'Race Committee Vessel',
-  placeName: 'Urla, Türkiye',                 // e.g. 'Cesme, Turkiye' — shown under the title
+  // Fallback only. The place shown under the title is derived from each log's
+  // own GPS fix, so a boat that moves between regattas labels itself correctly.
+  // This value is what shows before the lookup answers, or if it never does.
+  placeName: 'Urla, Türkiye',
   timeZone: 'Europe/Istanbul',   // display zone; the log itself is UTC
   defaultUnit: 'kn',             // 'kn' | 'ms' | 'kmh'
   pollSeconds: 30,
@@ -19,6 +22,18 @@ export const CONFIG = {
   // Directions in the log are magnetic. Leave true unless the device is
   // reconfigured to output true bearings.
   directionsAreMagnetic: true,
+
+  // Turning each log's GPS fix into a place name. The coordinates are sent to
+  // the endpoint below; set enabled: false to keep them entirely on the device
+  // and fall back to placeName. Answers are cached in the browser, rounded to
+  // ~100 m, so a season moored in one bay costs a single request.
+  geocode: {
+    enabled: true,
+    endpoint: 'https://nominatim.openstreetmap.org/reverse',
+    zoom: 14,              // 14 names the town; 12 and below only reach the province
+    minIntervalMs: 1100,   // Nominatim's usage policy is one request per second
+    cacheDays: 90,
+  },
 
   // The vessel is a race committee boat, not a fixed mast. Readings logged while
   // it is moving are boat-motion artefacts from a different place, so rows above

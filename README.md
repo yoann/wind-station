@@ -44,7 +44,8 @@ npm run build && npm run preview
    restriction is what makes that safe — it can only be used from your site,
    against a folder you already made public. Keep nothing else in that folder.
 
-3. **Fill in `config.js`** — `apiKey`, `stationName`, `placeName`.
+3. **Fill in `config.js`** — `apiKey`, `stationName`, `placeName` (a fallback;
+   see **Location**).
 
 4. **Push to `main`.** `.github/workflows/deploy.yml` runs the tests, builds,
    and publishes **only `dist/`** to GitHub Pages. The repo root — this README,
@@ -64,6 +65,8 @@ page — don't switch to it.)
   `pageSize=1`. About 1 KB. Sorted by modification time, never filename, so
   midnight rollover and re-uploads are handled.
 - Only when `modifiedTime` changes: `files/{id}?alt=media` for the CSV.
+- Once per day file, ever: `files/{id}?alt=media` with `Range: bytes=0-2047`,
+  to read that day's opening GPS fix for the picker label. See **Location**.
 
 Polling pauses when the tab is hidden and backs off exponentially on error
 (30 s → 60 s → … → 5 min cap). Selecting a past day pauses live polling until
@@ -83,6 +86,29 @@ The parser handles these, all observed in real files:
 | `38° 19.080' N` positions | degrees + decimal minutes → decimal degrees |
 | `306° M` bearings | integer degrees, magnetic |
 | Irregular 17–33 s sampling | every rolling statistic uses a **time** window, never a row count |
+
+## Location
+
+The place under the title is **derived from the log**, not configured. Every row
+carries a GPS fix, so each day's file states where it was recorded — which
+matters, because the station is a race committee vessel that moves between
+regattas. A hardcoded place would be wrong for half the season.
+
+- The fix is reverse-geocoded through OpenStreetMap Nominatim (no API key).
+- The picker names a day only when the folder spans more than one place; when
+  every day is from the same anchorage the name is noise and the masthead
+  already carries it.
+- To label days that have not been downloaded, each file is probed once with a
+  2 KB `Range` request — enough to reach its first data row.
+- Answers are cached in `localStorage`, keyed to the fix rounded to ~100 m, so
+  mooring swing does not re-ask and a whole season at one anchorage costs a
+  single request. Requests are spaced to one per second, Nominatim's policy.
+- A fix in open water genuinely resolves to nothing. That, a disabled lookup and
+  an unreachable network all fall back to `CONFIG.placeName`.
+
+**Privacy:** enabling this sends the station's coordinates to Nominatim. Set
+`geocode.enabled: false` in `config.js` to keep them on the device; the page
+then shows `placeName` as before.
 
 ## Design notes worth keeping
 
@@ -168,5 +194,7 @@ public/           copied verbatim into dist/ (CNAME, .nojekyll)
 ## Not built yet
 
 - Range requests for the tail of a growing file (currently re-fetches whole).
+  The request itself now exists — `fetchFileHead` in `lib/drive.js` — but it is
+  only used to read a file's opening fix, not to follow one that is growing.
 - A map. The station is moored — position is in the footer and the CSV only.
 - Multi-day aggregation, which needs precomputation a static site can't do.
