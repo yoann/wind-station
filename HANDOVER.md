@@ -31,7 +31,7 @@ fixed unless the user reopens them.
 | Infrastructure | Static hosting only, no backend | Forces browser-side Drive reads; rules out precomputed rollups |
 | Direction reference | **Magnetic**, uncorrected | The log emits `306° M`. No WMM conversion. Labelled `M` everywhere |
 | Position | Fixed marker, footer only | Vessel is moored (~13 m of drift). No map, no live position broadcast |
-| Place name | Reverse-geocoded from each file's own fix | The vessel moves between regattas, so a configured place is wrong half the season. `placeName` is the fallback |
+| Place name | Reverse-geocoded from each file's own fix, in English | The vessel moves between regattas, so a configured place is wrong half the season. Nothing is shown until the lookup answers |
 | Columns used | Date, Time, TWS, TWD | SOG/COG/TWA dropped from display, kept in the CSV download |
 | Under-way rows | Excluded above `CONFIG.maxSogKnots` (2 kn) | The boat is a race committee vessel; rows logged while it moves are boat-motion readings from elsewhere. Null SOG is kept |
 | Startup rows | First data row after every header dropped | The device writes a header per logging session; the reading that follows is the instrument warming up. 2 of 211 on the real fixture |
@@ -182,8 +182,8 @@ A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
    changes, the previous day's place must leave the screen immediately rather
    than sit above a log recorded 200 miles away. Second, every path in that
    module swallows its errors: a place name is cosmetic and must never be able
-   to keep the wind data off the screen. `CONFIG.placeName` is the fallback for
-   pending, disabled, failed and open-water lookups alike.
+   to keep the wind data off the screen. Pending, disabled, failed and
+   open-water lookups alike leave the line blank rather than name a guess.
 
 ---
 
@@ -216,8 +216,7 @@ A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
 - **Does the device log true gusts** in another mode? If so, prefer that over
   the 30-second maximum.
 - **Station display name** for `config.js` (currently generic). The place label
-  no longer needs deciding: it is derived from each file's own GPS fix, and
-  `placeName` is only the fallback.
+  no longer needs deciding: it is derived from each file's own GPS fix.
 - **Domain**, needed for the API-key referrer restriction.
 
 ---

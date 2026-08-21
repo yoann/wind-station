@@ -44,8 +44,7 @@ npm run build && npm run preview
    restriction is what makes that safe — it can only be used from your site,
    against a folder you already made public. Keep nothing else in that folder.
 
-3. **Fill in `config.js`** — `apiKey`, `stationName`, `placeName` (a fallback;
-   see **Location**).
+3. **Fill in `config.js`** — `apiKey`, `stationName`, `timeZone`.
 
 4. **Push to `main`.** `.github/workflows/deploy.yml` runs the tests, builds,
    and publishes **only `dist/`** to GitHub Pages. The repo root — this README,
@@ -103,12 +102,14 @@ regattas. A hardcoded place would be wrong for half the season.
 - Answers are cached in `localStorage`, keyed to the fix rounded to ~100 m, so
   mooring swing does not re-ask and a whole season at one anchorage costs a
   single request. Requests are spaced to one per second, Nominatim's policy.
+- Names are requested in English (`geocode.language`), so a station off Turkey
+  reads "Urla, Turkey" rather than the local spelling.
 - A fix in open water genuinely resolves to nothing. That, a disabled lookup and
-  an unreachable network all fall back to `CONFIG.placeName`.
+  an unreachable network all leave the line blank — the page never guesses.
 
 **Privacy:** enabling this sends the station's coordinates to Nominatim. Set
 `geocode.enabled: false` in `config.js` to keep them on the device; the page
-then shows `placeName` as before.
+then shows no place at all.
 
 ## Design notes worth keeping
 

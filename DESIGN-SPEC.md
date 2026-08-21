@@ -228,8 +228,12 @@ The vessel is a race committee boat: it moves between regattas, so the place is 
 each **file**, not of the site. Every row already carries a GPS fix, so the file states where it
 was recorded. A configured place would be silently wrong for half a season.
 
-- `CONFIG.placeName` is demoted to a **fallback** — shown while a lookup is pending, when
-  `geocode.enabled` is false, and when the fix resolves to nothing.
+- There is no configured place. The line is **empty** while a lookup is pending, when
+  `geocode.enabled` is false, and when the fix resolves to nothing: a placeholder location
+  is worse than none, because it reads as fact.
+- Names are requested in English (`accept-language=en`), so the masthead matches the rest of
+  the page instead of switching script with the country. The cache key is `…places.v2`; v1
+  holds locally-spelled names and is deliberately abandoned.
 - Reverse geocoding goes to OpenStreetMap Nominatim at `zoom=14`. Verified against the real
   station fix: 14 returns `town: Urla`, while 12 and below only reach `province: İzmir`. The
   locality preference puts `town` above `suburb` — the same fix also returns `suburb: İçmeler`,

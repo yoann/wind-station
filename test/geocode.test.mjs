@@ -169,7 +169,7 @@ test('distinct places are spaced by the throttle interval', async () => {
   assert.deepEqual(waits, [1000, 1000]);
 });
 
-test('the request carries the coordinates and the configured zoom', async () => {
+test('the request carries the coordinates, the configured zoom and the language', async () => {
   resetGeocodeCache();
   const fetchImpl = stubFetch(URLA);
   const { opts } = harness(fetchImpl, { endpoint: 'https://example.test/reverse', zoom: 14 });
@@ -180,6 +180,17 @@ test('the request carries the coordinates and the configured zoom', async () => 
   assert.equal(url.searchParams.get('lon'), '26.695');
   assert.equal(url.searchParams.get('zoom'), '14');
   assert.equal(url.searchParams.get('format'), 'jsonv2');
+  // Without this Nominatim answers in the local language, which is not the
+  // language the rest of the page is in.
+  assert.equal(url.searchParams.get('accept-language'), 'en');
+});
+
+test('the language is configurable', async () => {
+  resetGeocodeCache();
+  const fetchImpl = stubFetch(URLA);
+  const { opts } = harness(fetchImpl, { language: 'fr' });
+  await reverseGeocode(38.318, 26.695, opts);
+  assert.equal(new URL(fetchImpl.calls[0]).searchParams.get('accept-language'), 'fr');
 });
 
 test('a network failure resolves to null instead of throwing', async () => {

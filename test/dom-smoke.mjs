@@ -46,7 +46,7 @@ const syntheticDay = (date, lat, lon) => [
 const SYNTHETIC = {
   // Bodrum — a different regatta, so this day must be labelled apart.
   'drv-SsLog-17-08-2026.csv': syntheticDay('17/08/2026', "37\xB0 01.800' N", "027\xB0 25.800' E"),
-  // Open sea — nothing to name, so this day must fall back to CONFIG.placeName.
+  // Open sea — nothing to name, so this day must show no place at all.
   'drv-SsLog-16-08-2026.csv': syntheticDay('16/08/2026', "36\xB0 00.000' N", "023\xB0 00.000' E"),
 };
 
@@ -63,9 +63,8 @@ const bodyOf = (buf) => ({
 });
 const sampleBody = (name) => bodyOf(readFileSync(`${APP}/sample/${name}`));
 
-// Stub Nominatim. Deliberately answers a name that is NOT CONFIG.placeName, so
-// a masthead reading 'Zeytineli' proves the place came from the GPS fix and not
-// from config. Open water geocodes to nothing, as it really does.
+// Stub Nominatim. A masthead reading 'Zeytineli' proves the place came from the
+// GPS fix. Open water geocodes to nothing, as it really does.
 const GAZETTEER = [
   { lat: 38.318, lon: 26.695, address: { village: 'Zeytineli', country: 'T\u00FCrkiye' } },
   { lat: 37.030, lon: 27.430, address: { town: 'Bodrum', country: 'T\u00FCrkiye' } },
@@ -252,7 +251,7 @@ check('speed series loaded the bigger day', charts.at(-2).data.datasets[0].data.
 // Location derived from the GPS fixes
 const named = await waitFor(() => $('place-name').textContent === 'Zeytineli, T\u00FCrkiye');
 console.log('\nLocation derived from the GPS fix:');
-check('masthead names the place the coordinates are in, not CONFIG.placeName',
+check('masthead names the place the coordinates are in',
   named, `got "${$('place-name').textContent}"`);
 check('footer names the place beside the coordinates',
   /Zeytineli, T\u00FCrkiye \u00B7 38\.3180\u00B0/.test($('footer-meta').textContent), $('footer-meta').textContent);
@@ -278,15 +277,15 @@ check('the loaded day is never probed — its fix is already parsed',
   !rangeRequests.includes('drv-SsLog-19-08-2026.csv'), rangeRequests.join(' | '));
 
 // A fix over open water geocodes to nothing. The page must still render, with
-// the configured place as the fallback — this is the regression that matters.
+// no place named — this is the regression that matters.
 $('day-select').value = 'drv-SsLog-16-08-2026.csv';
 $('day-select').dispatchEvent(new window.Event('change'));
 await new Promise((r) => setTimeout(r, 300));
 console.log('\nAfter switching to a day logged over open water:');
-// Not a waitFor: the fallback must be on screen the moment the day changes,
-// never a stale name inherited from the day before it.
-check('masthead falls back to CONFIG.placeName when nothing can be named',
-  $('place-name').textContent === 'Urla, T\u00FCrkiye', `got "${$('place-name').textContent}"`);
+// Not a waitFor: the line must clear the moment the day changes, never keep a
+// stale name inherited from the day before it.
+check('masthead shows nothing when the fix cannot be named',
+  $('place-name').textContent === '', `got "${$('place-name').textContent}"`);
 check('footer omits the place but keeps the coordinates',
   !/Urla/.test($('footer-meta').textContent) && /36\.0000\u00B0/.test($('footer-meta').textContent),
   $('footer-meta').textContent);

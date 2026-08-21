@@ -267,8 +267,8 @@ function downloadCsv() {
 /* -- location -------------------------------------------------------------- */
 
 // The place under the title is derived from each log's own GPS fix, so a boat
-// that moves between regattas labels itself. CONFIG.placeName is the fallback
-// for a lookup that is pending, disabled, or came back with nothing.
+// that moves between regattas labels itself. Nothing is shown while a lookup is
+// pending, or when it is disabled or came back with nothing.
 //
 // Labelling the *picker* needs a fix from files we have not downloaded, so each
 // one is probed with a 2 KB Range request and the answer is remembered by file
@@ -311,8 +311,9 @@ function currentPlace() {
 }
 
 function renderPlace() {
-  const place = currentPlace() || CONFIG.placeName || '';
-  el('place-name').textContent = place;
+  // Blank until the lookup answers: a stale or configured place would claim a
+  // location this log was never recorded at.
+  el('place-name').textContent = currentPlace() || '';
 }
 
 /** First bytes of a file, enough to reach its opening fix. */
@@ -341,7 +342,7 @@ async function fixFor(file) {
 async function resolvePlaceFor(meta, station) {
   // Repaint first, before any await: the file on screen has just changed, and
   // leaving the previous day's place above it would assert a location this log
-  // was never recorded at. Falls back to CONFIG.placeName until the name lands.
+  // was never recorded at. The line stays empty until the name lands.
   renderPlace();
   if (!CONFIG.geocode?.enabled || !meta || !station) return;
   if (state.places.has(meta.id)) return;
