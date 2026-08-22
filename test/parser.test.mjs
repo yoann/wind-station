@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { parseLogBytes, parseTimestamp, parseDegMin, parseBearing, parseNumber, dateFromFilename, parseFirstFix, decodeLog } from '../lib/parser.js';
-import { vectorMeanDeg, circularDiff, beaufort, cardinal16, summarise, windowRows, formatSpeed, mooredRows, rollingVectorMeanDeg } from '../lib/stats.js';
+import { vectorMeanDeg, circularDiff, beaufort, cardinal16, summarise, windowRows, formatSpeed, mooredRows, rollingVectorMeanDeg, rollingMean } from '../lib/stats.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bytes = readFileSync(join(here, '..', 'sample', 'SsLog-19-08-2026.csv'));
@@ -259,4 +259,42 @@ test('rolling direction mean over the fixture tracks the dial', () => {
   const out = rollingVectorMeanDeg(rows, 5);
   assert.equal(out.length, rows.length);
   assert.equal(Math.round(out.at(-1)), Math.round(summarise(rows).dirSmoothed));
+});
+
+test('rolling speed mean uses a time window, not a row count', () => {
+  // Same crowding as the direction case: four samples in one minute, then one
+  // ten minutes later, whose window must hold only itself.
+  const rows5 = [
+    { t: 0, tws: 10 }, { t: 20_000, tws: 10 }, { t: 40_000, tws: 10 },
+    { t: 60_000, tws: 10 }, { t: 10 * 60_000, tws: 20 },
+  ];
+  const out = rollingMean(rows5, 5);
+  assert.equal(out[3], 10);
+  assert.equal(out[4], 20, 'the 10-knot run has aged out');
+});
+
+test('rolling speed mean is null-safe and aligned to its input', () => {
+  const rows5 = [
+    { t: 0, tws: null }, { t: 30_000, tws: 8 }, { t: 60_000, tws: 10 },
+  ];
+  const out = rollingMean(rows5, 5);
+  assert.equal(out.length, 3);
+  assert.equal(out[0], null, 'a window holding no reading yields null, not 0');
+  assert.equal(out[1], 8, 'the sentinel row is skipped, not counted as zero');
+  assert.equal(out[2], 9);
+  assert.deepEqual(rollingMean([], 5), []);
+});
+
+test('rolling speed mean over the fixture stays inside the samples it averages', () => {
+  const out = rollingMean(rows, 5);
+  const speeds = rows.map((r) => r.tws).filter((v) => v !== null);
+  assert.equal(out.length, rows.length);
+  assert.ok(out.every((v) => v === null
+    || (v >= Math.min(...speeds) && v <= Math.max(...speeds))));
+  // The last window is the mean tile's window at 5 minutes, computed the
+  // other way round — the two agree or one of them is wrong.
+  const last = rows.at(-1).t;
+  const window = rows.filter((r) => r.t > last - 5 * 60_000 && r.t <= last);
+  const plain = window.reduce((a, r) => a + r.tws, 0) / window.length;
+  assert.ok(Math.abs(out.at(-1) - plain) < 1e-9, `${out.at(-1)} vs ${plain}`);
 });

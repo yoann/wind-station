@@ -7,7 +7,7 @@
   --ink-3: #78838f;
   --line: #dfe4ea;
   --accent: #1f5fa5;
-  --accent-soft: rgba(31, 95, 165, 0.30);   /* direction samples, behind the mean line */
+  --accent-soft: rgba(31, 95, 165, 0.30);   /* chart samples, behind the mean line */
   --live: #12793f;
   --live-bg: #e3f3e9;
   --warn: #9a5b06;

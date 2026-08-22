@@ -3,7 +3,7 @@ import { parseLog, decodeLog, dateFromFilename, parseFirstFix } from './lib/pars
 import {
   summarise, freshness, formatAge, formatSpeed, UNITS, cardinal16, MINUTE, SUMMARY_MINUTES,
   TREND_MINUTES, SHIFT_MINUTES, SMOOTH_MINUTES,
-  min, max, windowRows, vectorMeanDeg, rollingVectorMeanDeg, mooredRows,
+  min, max, windowRows, vectorMeanDeg, rollingVectorMeanDeg, rollingMean, mooredRows,
 } from './lib/stats.js';
 import {
   paddedRange, directionRange, unwrapDeg, foldInto, normDeg, breakWraps,
@@ -538,11 +538,18 @@ const crosshair = {
 function renderCharts() {
   const theme = chartTheme();
   const rows = state.rows;
+  const factor = UNITS[state.unit].factor;
   const speedData = rows.map((r) => ({
     x: r.t,
-    y: r.tws === null ? null : r.tws * UNITS[state.unit].factor,
+    y: r.tws === null ? null : r.tws * factor,
   }));
-  const factor = UNITS[state.unit].factor;
+  // Same treatment as direction: every sample as a faded dot, the trailing mean
+  // as the line. Same length as speedData on purpose — syncTo() cross-highlights
+  // the charts by position, so a shorter series would desync the crosshair.
+  const speedAvg = rollingMean(rows, SMOOTH_MINUTES).map((v, i) => ({
+    x: rows[i].t,
+    y: v === null ? null : v * factor,
+  }));
   const speeds = speedData.map((p) => p.y);
   const speedAxis = speeds.some((y) => y !== null)
     ? paddedRange(min(speeds), max(speeds), {
@@ -589,31 +596,44 @@ function renderCharts() {
 
   if (twsChart) twsChart.destroy();
   twsChart = new Chart(el('chart-tws'), {
-    type: 'line',
+    type: 'scatter',
     data: {
-      datasets: [{
-        label: `Wind speed (${unitLabel()})`,
-        data: speedData,
-        borderColor: theme.accent,
-        backgroundColor: 'rgba(31, 95, 165, 0.10)',
-        borderWidth: 2,
-        pointRadius: 0,
-        pointHitRadius: 12,
-        // 'start' not true: `true` fills to y=0, which is off-scale once the
-        // axis floor lifts off zero and floods the whole panel.
-        fill: 'start',
-        tension: 0.3,
-        spanGaps: false,
-      }],
+      datasets: [
+        // Samples stay dataset 0: syncTo() and the DOM smoke test both index it.
+        {
+          label: `Wind speed (${unitLabel()})`,
+          data: speedData,
+          backgroundColor: theme.soft,
+          pointHoverBackgroundColor: theme.accent,
+          pointRadius: 2.2,
+          pointHoverRadius: 4,
+          order: 2,              // higher order draws first, i.e. behind
+        },
+        {
+          type: 'line',          // mixed dataset; LineController is registered
+          label: `${SMOOTH_MINUTES}-min mean`,
+          data: speedAvg,
+          borderColor: theme.accent,
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          spanGaps: false,       // a gap in the log is a gap in the line
+          tension: 0,            // already smoothed; no Bezier on top
+          order: 1,
+        },
+      ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      interaction: { mode: 'index', intersect: false },
+      interaction: { mode: 'nearest', axis: 'x', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: {
+          // The mean line is context, not a reading: report the sample under
+          // the cursor, never the smoothed value.
+          filter: (item) => item.datasetIndex === 0,
           callbacks: {
             title: (items) => clockAt(items[0].parsed.x),
             label: (item) => `${item.parsed.y?.toFixed(1) ?? '--'} ${unitLabel()}`,

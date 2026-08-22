@@ -116,6 +116,7 @@ timestamps, never a row count.** "Last 15 minutes" is not "the last 30 rows".
 | Trend | mean(last 15 min) − mean(previous 15 min), shown as ±kn |
 | Direction now | Vector mean of last 5 min (`SMOOTH_MINUTES`) |
 | Direction mean line | Trailing vector mean over `SMOOTH_MINUTES`, one value per sample, overlaid on the direction chart |
+| Speed mean line | Trailing arithmetic mean of TWS over the same `SMOOTH_MINUTES`, one value per sample, overlaid on the speed chart |
 | Veer / back | Signed circular difference: vector mean now vs 15 min ago. >0 veering, <0 backing |
 | Beaufort | Standard knots→force bands, with descriptor ("fresh breeze, force 5") |
 | Cardinal | 16-point from magnetic degrees, suffixed `M` |
@@ -139,9 +140,9 @@ Single page, single column on mobile, max ~900 px on desktop. Order top to botto
 3. **Secondary tiles** (2×2) — max 15 min, mean 15 min, trend, veer/back. The window is
    `SUMMARY_MINUTES` in `lib/stats.js` (`TREND_MINUTES` / `SHIFT_MINUTES` for the other
    two); every tile label is generated from those constants.
-4. **Charts** — TWS line over the day; TWD below it as *dots* with a 5-minute vector
-   mean line over them, sharing one x-axis and one crosshair. Both y-axes are cut to the
-   day's data rather than to a fixed range.
+4. **Charts** — TWS over the day as *dots* with a 5-minute mean line over them; TWD
+   below it in the same form, its line a vector mean. One x-axis and one crosshair
+   between them. Both y-axes are cut to the day's data rather than to a fixed range.
 5. **Wind rose** — 16 sectors × Beaufort bins, computed client-side from the day's rows.
 6. **Day picker + CSV download** — lazy: fetches one day's file on demand. Do not attempt
    multi-day ranges without a backend.
@@ -162,6 +163,17 @@ Five minutes because it damps sampling jitter while preserving the 8–12 minute
 oscillations a sailor reads a direction trace for; 10 or 15 would average those away.
 It is `SMOOTH_MINUTES` in `lib/stats.js`, shared with the dial, so the right-hand end
 of the line is the number in the hero.
+
+### Both charts carry the same mark
+
+Speed is drawn the same way: every sample a faded dot, one `SMOOTH_MINUTES` mean line
+over them (`rollingMean` in `lib/stats.js` — plain arithmetic, since speed has no wrap
+to average around). The panels stack, so an eye moving between them should not have to
+relearn what a mark means: dots are readings, the line is the trend, in both. It also
+puts the gusting spread on screen, which a smoothed line alone hides — the same reason
+the direction dots stayed when the mean line arrived. No area fill under it: the fill
+belonged to a line through every sample, and shading the region under a *mean* would
+claim a floor the readings do not have.
 
 ### Axes are cut to the data, not to the instrument
 

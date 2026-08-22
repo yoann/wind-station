@@ -36,6 +36,7 @@ fixed unless the user reopens them.
 | Under-way rows | Excluded above `CONFIG.maxSogKnots` (2 kn) | The boat is a race committee vessel; rows logged while it moves are boat-motion readings from elsewhere. Null SOG is kept |
 | Startup rows | First data row after every header dropped | The device writes a header per logging session; the reading that follows is the instrument warming up. 2 of 211 on the real fixture |
 | Direction chart | Dots for every sample, plus a 5-min vector mean line | The dots show spread, the line shows trend. 5 min keeps the 8–12 min oscillations a sailor reads for, and matches the dial |
+| Speed chart | Same mark as direction: faded dots plus a 5-min mean line | The two panels stack, so one mark should mean one thing in both. The dots keep the gusting spread visible, which a smoothed line alone hides. Replaced a filled line through every sample |
 | Charting | Chart.js 4, bundled | Was a CDN script; now tree-shaken into the build, no runtime third party |
 | Build | Vite, output to `dist/` | One JS + one CSS request instead of 8 files plus a CDN hit |
 | Deployment | GitHub Actions → Pages | Publishes `dist/` only, so the repo root is not served |
@@ -66,11 +67,11 @@ wind-station/
   lib/geocode.js                GPS fix → place name (cached, throttled)
   sample/SsLog-19-08-2026.csv   REAL log from the device (211 rows, 105 min)
   sample/SsLog-18-08-2026.csv   SYNTHETIC stress day (1922 rows, generated)
-  test/geocode.test.mjs         20 assertions
-  test/parser.test.mjs          30 assertions
-  test/scale.test.mjs           20 assertions
-  test/stress.test.mjs          6 assertions
-  test/dom-smoke.mjs            69 assertions, jsdom + stubbed Chart.js/Drive/Nominatim
+  test/geocode.test.mjs         21 tests
+  test/parser.test.mjs          33 tests
+  test/scale.test.mjs           20 tests
+  test/stress.test.mjs          6 tests
+  test/dom-smoke.mjs            78 assertions, jsdom + stubbed Chart.js/Drive/Nominatim
   test/make-stress-fixture.py   regenerates the synthetic day
   README.md                     setup and deployment
 ```
@@ -79,8 +80,8 @@ Verification status, all passing as of handover:
 
 ```bash
 npm install
-npm test                               # 51 assertions
-npm run test:dom                       # 58 assertions
+npm test                               # 80 tests
+npm run test:dom                       # 78 assertions
 npm run build && npm run preview       # visual check of the real bundle
 ```
 
@@ -147,12 +148,17 @@ A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
    180° — exactly backwards. See `vectorMeanDeg` in `lib/stats.js`.
 3. **"Max", not "gust".** At 30 s sampling these are instantaneous samples, not
    the 3-second peak "gust" means meteorologically. The footer says so.
-4. **The dial and the chart's mean line smooth identically.** Both read
+4. **The dial and both charts' mean lines smooth identically.** All read
    `SMOOTH_MINUTES` (5) from `lib/stats.js` — the dial via `summarise()`, the
-   chart via `rollingVectorMeanDeg()` — so the right-hand end of the line is the
-   number under the dial (334° on the real fixture, where the last raw sample is
-   327°). Change the constant and both move together; the footer states the
-   window, so update that text too.
+   direction line via `rollingVectorMeanDeg()`, the speed line via
+   `rollingMean()` — so the right-hand end of the direction line is the number
+   under the dial (334° on the real fixture, where the last raw sample is 327°),
+   and speed is smoothed over the same span rather than a second window nobody
+   can compare against. Change the constant and all three move together.
+   Both charts also draw the same marks: faded dots (`--accent-soft`) for every
+   sample, the mean line in `--accent` over them, samples as dataset 0 because
+   `syncTo` cross-highlights the charts by that index. Keep each mean series the
+   same length as its sample series, for the same reason.
 5. **Offline is a first-class state.** Over 15 min stale → dial greys out, pill
    reads "offline since HH:MM". A confident reading from yesterday is worse
    than no reading. States: live (<2 min), delayed (2–15 min), offline (>15 min),

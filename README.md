@@ -119,16 +119,20 @@ then shows no place at all.
   that chart is the 5-minute vector mean, which is safe because it rides the
   unwrapped axis and is broken with a gap wherever a fold would draw a cliff
   (`breakWraps` in `lib/scale.js`).
+- **Both charts carry the same mark.** Speed is drawn the same way as direction:
+  faded dots for every sample, one 5-minute mean line over them. The panels
+  stack, so the same mark should mean the same thing in both — and the dots keep
+  the gusting spread on screen, which a smoothed line alone would hide.
 - **Both chart axes are cut to the data.** Min and max come from the day's
   samples plus a margin, over a minimum span so a flat stretch does not zoom
   into sampling noise. Direction is centred on the last 15-minute vector mean
   and unwrapped around it, keeping a northerly in one band. See `lib/scale.js`.
 - **Circular means use vectors.** The arithmetic mean of 350° and 010° is 180°,
   pointing exactly backwards. `vectorMeanDeg` averages unit vectors instead.
-- **The dial and the chart's mean line smooth identically.** Both use
-  `SMOOTH_MINUTES` (5) from `lib/stats.js`, so the right-hand end of the line is
-  the number under the dial. The dots behind it are still every raw sample.
-  This is disclosed in the page footer.
+- **The dial and the charts' mean lines smooth identically.** All three use
+  `SMOOTH_MINUTES` (5) from `lib/stats.js`, so the right-hand end of the
+  direction line is the number under the dial, and speed is smoothed over the
+  same span. The dots behind the lines are still every raw sample.
 - **"Max", not "gust".** At 30 s sampling these are instantaneous samples, not
   the 3-second peak that "gust" means meteorologically.
 - **Offline is a first-class state.** Over 15 minutes stale, the dial greys out
@@ -153,8 +157,8 @@ then shows no place at all.
 npm test
 ```
 
-41 assertions over the parser, the statistics, the axis scales and the wind
-rose, with fixtures taken from a real log: 211 rows, 3 header blocks,
+80 tests over the parser, the statistics, the axis scales, the geocoder and the
+wind rose, with fixtures taken from a real log: 211 rows, 3 header blocks,
 13 sentinel rows, TWS 7.3–11.2, TWD 296–339 M.
 
 `test/stress.test.mjs` runs against a synthetic day that the real sample cannot

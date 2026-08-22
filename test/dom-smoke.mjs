@@ -161,9 +161,9 @@ check('rose segments match the narrow day (3 sectors x 2 bands)', $('rose').quer
 check('rose legend built', $('rose-legend').children.length === 6);
 check('footer meta populated', /samples/.test($('footer-meta').textContent), $('footer-meta').textContent);
 check('nothing excluded — the fixture day is moored throughout', !/excluded/.test($('footer-meta').textContent), $('footer-meta').textContent);
-// The direction dots read --accent-soft. Without it in both themes they fall
-// back to a Chart.js default and stop matching the line they sit under.
-check('both themes define the soft accent the direction dots use',
+// The sample dots on both charts read --accent-soft. Without it in both themes
+// they fall back to a Chart.js default and stop matching the line they sit under.
+check('both themes define the soft accent the sample dots use',
   (appCss.match(/--accent-soft:/g) || []).length === 2,
   `${(appCss.match(/--accent-soft:/g) || []).length} definitions`);
 check('footer discloses the startup rows dropped', /2 dropped at startup/.test($('footer-meta').textContent), $('footer-meta').textContent);
@@ -172,7 +172,7 @@ check('two charts created', charts.length === 2, `${charts.length}`);
 
 if (charts.length === 2) {
   const [tws, twd] = charts;
-  check('speed chart is a line', tws.config.type === 'line');
+  check('speed chart is a scatter', tws.config.type === 'scatter');
   check('direction chart is a scatter', twd.config.type === 'scatter');
   const dy = twd.config.options.scales.y;
   const sy = tws.config.options.scales.y;
@@ -183,7 +183,6 @@ if (charts.length === 2) {
   check('speed y-axis lifts off zero on the narrow day', sy.min > 0, `min ${sy.min}`);
   check('speed y-axis clears the peak', sy.max > Math.max(...tws.data.datasets[0].data.map((p) => p.y ?? 0)));
   check('speed y-axis keeps a readable floor', sy.max - sy.min >= 5, `${sy.max - sy.min} kn`);
-  check('speed area fills to the axis, not to zero', tws.data.datasets[0].fill === 'start');
   check('x scale configs are distinct objects', tws.config.options.scales.x !== twd.config.options.scales.x);
   // 211 parsed rows, less the 2 that opened a logging session.
   check('speed series has 209 points', tws.data.datasets[0].data.length === 209, `${tws.data.datasets[0].data.length}`);
@@ -219,6 +218,37 @@ if (charts.length === 2) {
   check('tooltip reports the sample, not the mean',
     twd.config.options.plugins.tooltip.filter({ datasetIndex: 0 }) === true
     && twd.config.options.plugins.tooltip.filter({ datasetIndex: 1 }) === false);
+
+  // The speed chart carries the same treatment: faded dots for every sample,
+  // one mean line over them, smoothed over the same window as the direction one.
+  check('speed chart overlays a mean line on the samples', tws.data.datasets.length === 2,
+    `${tws.data.datasets.length} datasets`);
+  const savg = tws.data.datasets[1];
+  check('speed mean series is a line', savg?.type === 'line', `${savg?.type}`);
+  check('speed mean line shares the direction chart\'s window',
+    savg?.label === avg?.label, `${savg?.label}`);
+  check('speed mean line draws over the samples', savg?.order < tws.data.datasets[0].order);
+  check('speed samples get a hover colour distinct from their resting shade',
+    'pointHoverBackgroundColor' in tws.data.datasets[0]);
+  check('speed mean series aligns with the samples',
+    savg?.data.length === tws.data.datasets[0].data.length, `${savg?.data.length}`);
+  check('speed mean line honours its gaps', savg?.spanGaps === false);
+  check('speed mean line stays inside the axis',
+    savg?.data.every((p) => p.y === null || (p.y >= sy.min && p.y <= sy.max)));
+  check('speed mean line is smoother than the samples it averages', (() => {
+    const jump = (d) => {
+      let worst = 0;
+      for (let i = 1; i < d.length; i++) {
+        if (d[i].y === null || d[i - 1].y === null) continue;
+        worst = Math.max(worst, Math.abs(d[i].y - d[i - 1].y));
+      }
+      return worst;
+    };
+    return jump(savg.data) < jump(tws.data.datasets[0].data);
+  })());
+  check('speed tooltip reports the sample, not the mean',
+    tws.config.options.plugins.tooltip.filter({ datasetIndex: 0 }) === true
+    && tws.config.options.plugins.tooltip.filter({ datasetIndex: 1 }) === false);
   check('degree tick callback', dy.ticks.callback(90) === '090\u00B0', dy.ticks.callback(90));
   check('degree tick callback normalises an unwrapped value', dy.ticks.callback(-5) === '355\u00B0', dy.ticks.callback(-5));
 }
