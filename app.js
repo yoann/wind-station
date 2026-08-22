@@ -117,6 +117,29 @@ function boot() {
 
   el('download').addEventListener('click', downloadCsv);
 
+  // A tap pins the tooltip and crosshair, and on touch nothing takes them back
+  // down: Chart.js hides them on `mouseout`, which a finger never sends. Dismiss
+  // on any pointer landing outside the two canvases, and on scroll — a pinned
+  // label otherwise rides off-screen with the chart. These go on the document
+  // rather than the canvases because renderCharts() destroys and rebuilds both
+  // chart instances on every poll, unit switch and day change.
+  let scrubbing = false;
+
+  document.addEventListener('pointerdown', (e) => {
+    scrubbing = e.target === el('chart-tws') || e.target === el('chart-twd');
+    if (!scrubbing) clearReadouts();
+  }, true);
+
+  const endScrub = () => { scrubbing = false; };
+  document.addEventListener('pointerup', endScrub, true);
+  document.addEventListener('pointercancel', endScrub, true);
+
+  // Dragging along a chart to read values scrolls the page on touch. That must
+  // not dismiss the readout the drag is producing.
+  window.addEventListener('scroll', () => {
+    if (!scrubbing) clearReadouts();
+  }, { passive: true });
+
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) load();
   });
@@ -800,7 +823,26 @@ function syncTo(target, elements) {
     const idx = Math.min(elements[0].index, target.data.datasets[0].data.length - 1);
     target.setActiveElements([{ datasetIndex: 0, index: idx }]);
   }
+  // Only the chart under the pointer carries a bubble; the mirror gets the
+  // crosshair and the dot. Without this, tapping one chart and then the other
+  // leaves the first one's bubble stranded on screen.
+  target.tooltip?.setActiveElements([], { x: 0, y: 0 });
   target.update('none');
+}
+
+// Chart.js keeps two independent active-element lists: chart._active drives the
+// hover dot and the crosshair, tooltip._active drives the bubble. Clearing one
+// leaves the other on screen, so both have to be reset together.
+function clearReadout(chart) {
+  if (!chart) return;
+  chart.setActiveElements([]);
+  chart.tooltip?.setActiveElements([], { x: 0, y: 0 });
+  chart.update('none');
+}
+
+function clearReadouts() {
+  clearReadout(twsChart);
+  clearReadout(twdChart);
 }
 
 /* -- go ------------------------------------------------------------------- */

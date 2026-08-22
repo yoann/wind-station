@@ -23,8 +23,13 @@ class ChartStub {
   }
   destroy() {}
   update() {}
-  setActiveElements() {}
+  // Recorded, not ignored: the dismissal assertions below check that both the
+  // hover state and the tooltip's own separate state are cleared.
+  setActiveElements(active) { this.active.push(active); }
   getActiveElements() { return []; }
+  active = [];
+  tooltipActive = [];
+  tooltip = { setActiveElements: (active) => this.tooltipActive.push(active) };
 }
 window.Chart = ChartStub;
 
@@ -376,6 +381,50 @@ console.log('\nOn a load that answers straight away:');
 check('nothing dims — the treatment waits out the threshold', !flashed);
 check('the pill never flickers through Loading', $('status-text').textContent === 'Viewing history',
   $('status-text').textContent);
+
+// A tap pins the tooltip and crosshair, and on touch Chart.js never takes them
+// back down — it hides on `mouseout`, which a finger does not send. jsdom has no
+// PointerEvent constructor; a plain Event of the right type is enough, because
+// dispatching is what sets e.target.
+const live = charts.slice(-2);
+const cleared = (c) => c.active.some((a) => a.length === 0)
+  && c.tooltipActive.some((a) => a.length === 0);
+const forget = () => live.forEach((c) => { c.active.length = 0; c.tooltipActive.length = 0; });
+const pointerDownOn = (node) => node.dispatchEvent(
+  new window.Event('pointerdown', { bubbles: true }),
+);
+
+console.log('\nWhen the charts lose focus:');
+
+forget();
+pointerDownOn(window.document.body);
+check('a tap outside clears the speed chart, bubble and crosshair both',
+  cleared(live[0]));
+check('a tap outside clears the direction chart too', cleared(live[1]));
+
+forget();
+pointerDownOn($('chart-tws'));
+check('a tap on a chart is not a dismissal',
+  live.every((c) => c.active.length === 0 && c.tooltipActive.length === 0));
+
+forget();
+$('chart-tws').dispatchEvent(new window.Event('pointerup', { bubbles: true }));
+window.dispatchEvent(new window.Event('scroll'));
+check('scrolling clears both — a pinned label must not ride off-screen',
+  live.every(cleared));
+
+// The finger that scrolls may be the one scrubbing the chart. That drag must
+// keep its own readout.
+forget();
+pointerDownOn($('chart-twd'));
+window.dispatchEvent(new window.Event('scroll'));
+check('a drag along a chart survives the scroll it causes',
+  live.every((c) => c.active.length === 0 && c.tooltipActive.length === 0));
+
+forget();
+$('chart-twd').dispatchEvent(new window.Event('pointerup', { bubbles: true }));
+window.dispatchEvent(new window.Event('scroll'));
+check('once the finger lifts, scrolling dismisses again', live.every(cleared));
 
 console.log(fails.length ? `\n${fails.length} failing\n` : '\nall passing\n');
 process.exit(fails.length ? 1 : 0);
