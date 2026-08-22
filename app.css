@@ -103,12 +103,10 @@ h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
 .dial-ticks line { stroke: var(--ink-3); stroke-width: 1; }
 .dial-rose { fill: var(--ink-3); font-size: 11px; font-weight: 500; }
 .needle-shape { fill: var(--accent); }
-.needle-stem { stroke: var(--accent); stroke-width: 2; }
-.dial-hub { fill: var(--accent); }
 .dial-speed { fill: var(--ink); font-size: 40px; font-weight: 600; letter-spacing: -0.02em; }
 .dial-unit { fill: var(--ink-3); font-size: 13px; }
 
-#dial.stale .needle-shape, #dial.stale .needle-stem, #dial.stale .dial-hub { opacity: 0.28; }
+#dial.stale .needle-shape { opacity: 0.28; }
 #dial.stale .dial-speed { fill: var(--ink-3); }
 
 .readout { text-align: center; }

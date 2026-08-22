@@ -135,8 +135,12 @@ accurate and costs nothing.
 Single page, single column on mobile, max ~900 px on desktop. Order top to bottom:
 
 1. **Header** — station name, place name, freshness pill.
-2. **Hero** — compass dial (needle at TWD magnetic) with TWS as the centre number; Beaufort
-   descriptor line beneath. This plus the pill fills the first mobile screen.
+2. **Hero** — compass dial with TWS as the centre number; Beaufort
+   descriptor line beneath. The arrow flies inward from the rim: its tail sits at TWD
+   magnetic, the bearing the wind comes from, and the head is aimed at the centre, so it
+   reads as the wind arriving rather than as a pointer aimed at its source. It stops at
+   r=48, clear of the widest speed the number can show, so no bearing crosses the digits.
+   This plus the pill fills the first mobile screen.
 3. **Secondary tiles** (2×2) — max 15 min, mean 15 min, trend, veer/back. The window is
    `SUMMARY_MINUTES` in `lib/stats.js` (`TREND_MINUTES` / `SHIFT_MINUTES` for the other
    two); every tile label is generated from those constants.
