@@ -37,6 +37,7 @@ fixed unless the user reopens them.
 | Startup rows | First data row after every header dropped | The device writes a header per logging session; the reading that follows is the instrument warming up. 2 of 211 on the real fixture |
 | Direction chart | Dots for every sample, plus a 5-min vector mean line | The dots show spread, the line shows trend. 5 min keeps the 8–12 min oscillations a sailor reads for, and matches the dial |
 | Speed chart | Same mark as direction: faded dots plus a 5-min mean line | The two panels stack, so one mark should mean one thing in both. The dots keep the gusting spread visible, which a smoothed line alone hides. Replaced a filled line through every sample |
+| Load feedback | Stale panels dim, pill reads `Loading…`, after a 180 ms threshold | A day change used to leave the previous day's numbers under the new day's label with no acknowledgement. Only user-initiated loads (boot, day change, back-to-live) — a background poll must never dim the page or displace the `Live` pill |
 | Charting | Chart.js 4, bundled | Was a CDN script; now tree-shaken into the build, no runtime third party |
 | Build | Vite, output to `dist/` | One JS + one CSS request instead of 8 files plus a CDN hit |
 | Deployment | GitHub Actions → Pages | Publishes `dist/` only, so the repo root is not served |

@@ -64,7 +64,10 @@ main, .masthead, footer, .banner { max-width: var(--max); margin-inline: auto; }
   gap: 12px; padding: 20px 0 16px; border-bottom: 1px solid var(--line);
 }
 h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
-.place { margin: 2px 0 0; color: var(--ink-2); font-size: 14px; }
+/* min-height, because this line is often empty — before a lookup answers, and
+   for the whole of a day change. Without it the masthead collapses and the
+   entire page jumps up a line. */
+.place { margin: 2px 0 0; color: var(--ink-2); font-size: 14px; min-height: 1.55em; }
 
 .pill {
   display: inline-flex; align-items: center; gap: 7px; flex: none;
@@ -139,6 +142,25 @@ select, .btn {
 .btn-quiet { color: var(--ink-2); }
 select:focus-visible, .btn:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn:disabled:hover { background: var(--surface); }
+
+/* Loading ----------------------------------------------------------------- */
+
+/* Only what describes the data dims. The controls and the status pill stay at
+   full strength: the thing you just used, and the thing telling you why the
+   page went quiet, are the two that must not grey out. */
+.hero, .tiles, .panel, #footer-meta { transition: opacity 120ms ease; }
+body.is-loading .hero,
+body.is-loading .tiles,
+body.is-loading .panel,
+body.is-loading #footer-meta {
+  opacity: 0.45;
+  pointer-events: none;    /* no tooltip or crosshair on the last day's chart */
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero, .tiles, .panel, #footer-meta { transition: none; }
 }
 
 /* Panels ------------------------------------------------------------------ */

@@ -71,6 +71,9 @@ const GAZETTEER = [
 ];
 const geocodeCalls = [];
 const rangeRequests = [];
+// Held downloads: the busy treatment only shows after BUSY_DELAY, so a stub that
+// answers instantly can prove it stays hidden but never that it appears.
+let downloadDelayMs = 0;
 
 window.fetch = async (url, options) => {
   const u = new URL(String(url), 'https://example.org/');
@@ -96,6 +99,7 @@ window.fetch = async (url, options) => {
   if (range) rangeRequests.push(id);
   const meta = DRIVE_FILES.find((f) => f.id === id);
   if (meta && u.searchParams.get('alt') === 'media') {
+    if (downloadDelayMs && !range) await new Promise((r) => setTimeout(r, downloadDelayMs));
     // Drive honours Range; serving the whole file is a superset the parser
     // handles, and the header itself is asserted below.
     return SYNTHETIC[id] ? bodyOf(Buffer.from(SYNTHETIC[id], 'latin1')) : sampleBody(meta.name);
@@ -320,6 +324,58 @@ check('footer omits the place but keeps the coordinates',
   !/Urla/.test($('footer-meta').textContent) && /36\.0000\u00B0/.test($('footer-meta').textContent),
   $('footer-meta').textContent);
 check('the day still renders its readings', $('dial-speed').textContent !== '--', $('dial-speed').textContent);
+
+// Busy feedback. A day change has to acknowledge itself: the file on screen is
+// no longer the one the picker names, and until the new one lands the reader is
+// looking at the wrong day's numbers.
+const main = document.querySelector('main');
+downloadDelayMs = 500;
+$('day-select').value = 'drv-SsLog-17-08-2026.csv';
+$('day-select').dispatchEvent(new window.Event('change'));
+console.log('\nWhile a slow day is loading:');
+// Synchronous, before any await: these two name a specific log, and the picker
+// has already stopped naming it.
+check('busy announced the instant the day changes', main.getAttribute('aria-busy') === 'true',
+  `aria-busy="${main.getAttribute('aria-busy')}"`);
+check('the previous day\'s place leaves the screen at once',
+  $('place-name').textContent === '', `got "${$('place-name').textContent}"`);
+check('the previous day\'s filename leaves the footer at once',
+  !/SsLog-16-08-2026\.csv/.test($('footer-meta').textContent), $('footer-meta').textContent);
+
+const dimmed = await waitFor(() => window.document.body.classList.contains('is-loading'), 1000);
+check('stale readings dim once the wait is worth mentioning', dimmed);
+check('status pill says why the page went quiet', $('status-text').textContent === 'Loading\u2026',
+  $('status-text').textContent);
+check('download is withheld — it serves a file no longer on screen', $('download').disabled);
+check('the readings themselves are still there, only faded',
+  $('dial-speed').textContent !== '--', $('dial-speed').textContent);
+
+const settled = await waitFor(() => !window.document.body.classList.contains('is-loading'), 2000);
+console.log('\nOnce it lands:');
+check('the dim clears', settled);
+check('busy stands down', main.getAttribute('aria-busy') === 'false',
+  `aria-busy="${main.getAttribute('aria-busy')}"`);
+check('download is offered again', !$('download').disabled);
+check('the pill hands back to the freshness state', $('status-text').textContent === 'Viewing history',
+  $('status-text').textContent);
+check('the new day is the one on screen', /SsLog-17-08-2026\.csv/.test($('footer-meta').textContent),
+  $('footer-meta').textContent);
+
+// The other half of the threshold: a load that answers straight away must not
+// flash the treatment on and off. That flicker is worse than no feedback.
+downloadDelayMs = 0;
+let flashed = false;
+const watch = setInterval(() => {
+  if (window.document.body.classList.contains('is-loading')) flashed = true;
+}, 5);
+$('day-select').value = 'drv-SsLog-16-08-2026.csv';
+$('day-select').dispatchEvent(new window.Event('change'));
+await new Promise((r) => setTimeout(r, 400));
+clearInterval(watch);
+console.log('\nOn a load that answers straight away:');
+check('nothing dims — the treatment waits out the threshold', !flashed);
+check('the pill never flickers through Loading', $('status-text').textContent === 'Viewing history',
+  $('status-text').textContent);
 
 console.log(fails.length ? `\n${fails.length} failing\n` : '\nall passing\n');
 process.exit(fails.length ? 1 : 0);

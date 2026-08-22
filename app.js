@@ -27,6 +27,11 @@ const SPEED_MIN_SPAN_KN = 5;
 const DIR_MIN_SPAN_DEG = 60;
 const DIR_CENTRE_MINUTES = 15;
 
+// A load off the sample folder, or a warm Drive cache, resolves in a few frames.
+// Dimming the page for one of them reads as a flicker, which is worse than no
+// feedback at all, so the busy treatment waits this long before it shows.
+const BUSY_DELAY = 180;
+
 // Shown instead of "no data" when the file held readings but every one of them
 // was logged while the boat was moving — a real state, not an outage.
 const UNDER_WAY = 'Vessel under way \u2014 no station readings';
@@ -40,6 +45,8 @@ const state = {
   excluded: 0,          // rows dropped because the vessel was under way
   warmup: 0,            // rows dropped as the instrument's first of a session
   viewingDay: '',       // '' = follow latest, otherwise a file id
+  loading: false,       // a user-initiated fetch is in flight
+  busy: false,          // ...and it has outlasted BUSY_DELAY, so say so on screen
   error: null,
   backoff: 0,
   places: new Map(),    // file id -> place name, or null once looked up in vain
@@ -50,6 +57,7 @@ const el = (id) => document.getElementById(id);
 let twsChart = null;
 let twdChart = null;
 let pollTimer = null;
+let busyTimer = null;
 
 /* -- formatting ----------------------------------------------------------- */
 
@@ -95,14 +103,16 @@ function boot() {
   el('day-select').addEventListener('change', (e) => {
     state.viewingDay = e.target.value;
     el('back-to-live').hidden = !state.viewingDay;
-    load({ force: true });
+    clearFile();
+    load({ force: true, busy: true });
   });
 
   el('back-to-live').addEventListener('click', () => {
     state.viewingDay = '';
     el('day-select').value = '';
     el('back-to-live').hidden = true;
-    load({ force: true });
+    clearFile();
+    load({ force: true, busy: true });
   });
 
   el('download').addEventListener('click', downloadCsv);
@@ -117,7 +127,7 @@ function boot() {
       'Demo mode — showing the bundled sample file. Add an API key in config.js to go live.';
   }
 
-  load();
+  load({ busy: true });
   setInterval(renderFreshness, 5000);
 }
 
@@ -141,7 +151,8 @@ function buildDialTicks() {
 
 /* -- loading -------------------------------------------------------------- */
 
-async function load({ force = false } = {}) {
+async function load({ force = false, busy = false } = {}) {
+  if (busy) beginBusy();
   try {
     if (DEMO) {
       const path = state.viewingDay || DEMO_FILES[0].id;
@@ -186,6 +197,10 @@ async function load({ force = false } = {}) {
     state.backoff = Math.min(state.backoff ? state.backoff * 2 : 1, 10);
     render();
   } finally {
+    // Before scheduleNext, and before this function returns to whatever paints
+    // next: leaving the flag up would repaint the pill as 'Loading' on data
+    // that has already landed.
+    if (busy) { endBusy(); renderFreshness(); }
     scheduleNext();
   }
 }
@@ -205,6 +220,48 @@ function ingest(bytes, meta) {
   state.station = fixed ? { lat: fixed.lat, lon: fixed.lon } : station;
   state.fileMeta = meta;
   resolvePlaceFor(meta, state.station);
+}
+
+/**
+ * Acknowledge a load the reader asked for. The stale panels dim and the pill
+ * says why, but only once the wait is long enough to be worth mentioning:
+ * `loading` goes up at once so assistive tech hears it, `busy` — the visible
+ * half — waits out BUSY_DELAY. Background polls never call this; a poll must
+ * not grey the page out or push the Live pill aside.
+ */
+function beginBusy() {
+  state.loading = true;
+  document.querySelector('main').setAttribute('aria-busy', 'true');
+  clearTimeout(busyTimer);
+  busyTimer = setTimeout(() => {
+    if (!state.loading) return;
+    state.busy = true;
+    document.body.classList.add('is-loading');
+    // The button serves the file on screen, and right now there isn't one.
+    el('download').disabled = true;
+    renderFreshness();
+  }, BUSY_DELAY);
+}
+
+function endBusy() {
+  clearTimeout(busyTimer);
+  state.loading = false;
+  state.busy = false;
+  document.body.classList.remove('is-loading');
+  el('download').disabled = false;
+  document.querySelector('main').setAttribute('aria-busy', 'false');
+}
+
+/**
+ * Forget the file on screen, the moment the reader picks a different day. The
+ * place name and the footer's filename both name a specific log, and naming the
+ * old one over the new one's label is the mistake invariant 9 exists to prevent.
+ * The readings themselves stay, dimmed, until the new ones land.
+ */
+function clearFile() {
+  state.fileMeta = null;
+  renderPlace();
+  renderFooter();
 }
 
 function scheduleNext() {
@@ -452,6 +509,13 @@ function renderFreshness() {
   const text = el('status-text');
   pill.className = 'pill';
 
+  // First, ahead of the error: a retry after a failure should read as trying
+  // again, not as the old failure still standing.
+  if (state.busy) {
+    pill.classList.add('pill-loading');
+    text.textContent = 'Loading\u2026';
+    return;
+  }
   if (state.error) {
     pill.classList.add('pill-error');
     text.textContent = state.error;
