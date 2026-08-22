@@ -8,7 +8,7 @@ export const CONFIG = {
   //   - the Drive API only
   //   - an HTTP referrer matching your domain
   // Leaving this empty runs the site in demo mode against sample/.
-  // apiKey: 'AIzaSyAAdtZRjeeHO73HJw_lcJvnTWsDzx13BIo',
+  apiKey: 'AIzaSyAAdtZRjeeHO73HJw_lcJvnTWsDzx13BIo',
 
   stationName: 'Race Committee Vessel',
   // The place shown under the title is derived from each log's own GPS fix, so
