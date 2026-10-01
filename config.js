@@ -14,7 +14,6 @@ export const CONFIG = {
   // The place shown under the title is derived from each log's own GPS fix, so
   // a boat that moves between regattas labels itself correctly. Until the
   // lookup answers, nothing is shown rather than a guess.
-  timeZone: 'Europe/Istanbul',   // display zone; the log itself is UTC
   defaultUnit: 'kn',             // 'kn' | 'ms' | 'kmh'
   pollSeconds: 30,
 

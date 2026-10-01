@@ -61,11 +61,15 @@ let busyTimer = null;
 
 /* -- formatting ----------------------------------------------------------- */
 
+// Clock times follow the viewer's device zone; the log itself is UTC.
 const timeFmt = new Intl.DateTimeFormat('en-GB', {
-  hour: '2-digit', minute: '2-digit', timeZone: CONFIG.timeZone, hour12: false,
+  hour: '2-digit', minute: '2-digit', hour12: false,
 });
+const viewerZone = timeFmt.resolvedOptions().timeZone;
+// Day labels are calendar dates from the filename, built as UTC midnight —
+// formatting them in a zone west of UTC would show the day before.
 const dateFmt = new Intl.DateTimeFormat('en-GB', {
-  weekday: 'short', day: 'numeric', month: 'short', timeZone: CONFIG.timeZone,
+  weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC',
 });
 
 const clockAt = (ms) => timeFmt.format(new Date(ms));
@@ -583,7 +587,7 @@ function renderFooter() {
   if (state.station) {
     bits.push(`${state.station.lat.toFixed(4)}\u00B0, ${state.station.lon.toFixed(4)}\u00B0`);
   }
-  bits.push(`times shown in ${CONFIG.timeZone.replace('_', ' ')}`);
+  bits.push(`times shown in ${viewerZone.replaceAll('_', ' ')}`);
   el('footer-meta').textContent = bits.join(' \u00B7 ');
 }
 

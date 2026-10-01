@@ -116,7 +116,7 @@ Do not "simplify" the parser without re-reading this list.
 | Column names have a leading apostrophe | `'Date, 'Time,` | Cosmetic, but don't match on `Date` alone |
 | No-data sentinel | `- - - - -` | → `null`, never `0`. Seen in SOG/COG on GPS dropout (13 of 211 rows) |
 | Dates are `dd/mm/yyyy` | `19/08/2026` | Parse explicitly. `new Date("08/09/2026")` is 8 Sept or 9 Aug depending on locale |
-| Times carry `UTC` | `10:18:02 UTC` | Parse as UTC; display in `Europe/Istanbul` |
+| Times carry `UTC` | `10:18:02 UTC` | Parse as UTC; display in the viewer's local timezone |
 | Positions are deg + decimal minutes | `38° 19.080' N` | → `deg + min/60`, negate for S/W |
 | Bearings are magnetic | `306° M` | Integer degrees; the `M` is meaningful |
 | Sampling is irregular | 17–33 s, mostly 28–32 | **Every rolling stat must use a time window, never a row count** |

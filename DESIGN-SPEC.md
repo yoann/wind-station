@@ -208,7 +208,7 @@ off. Build the offline state first, not last.
 - Dark-capable, high contrast, legible in sunlight. Mobile-first.
 - One blue sequential ramp keyed to Beaufort bands, reused in the rose and any heatmap. No
   rainbow, no per-chart palette.
-- Times displayed in Europe/Istanbul with the UTC value in the tooltip. The log is explicit UTC,
+- Times displayed in the viewer's device timezone with the UTC value in the tooltip. The log is explicit UTC,
   so there is no guessing.
 - Units toggle: knots (default) / m/s / km/h. Persist in `localStorage` and mirror to the URL
   hash so a shared link keeps the sender's units.

@@ -44,7 +44,7 @@ npm run build && npm run preview
    restriction is what makes that safe — it can only be used from your site,
    against a folder you already made public. Keep nothing else in that folder.
 
-3. **Fill in `config.js`** — `apiKey`, `stationName`, `timeZone`.
+3. **Fill in `config.js`** — `apiKey`, `stationName`.
 
 4. **Push to `main`.** `.github/workflows/deploy.yml` runs the tests, builds,
    and publishes **only `dist/`** to GitHub Pages. The repo root — this README,
@@ -81,7 +81,7 @@ The parser handles these, all observed in real files:
 | Header repeats mid-file | every line starting `'Date` is skipped, not just line 1 |
 | `- - - - -` no-data sentinel | becomes `null`, never `0`; charts show a gap |
 | `dd/mm/yyyy` dates | parsed explicitly; never passed to `new Date()` |
-| `HH:MM:SS UTC` times | parsed as UTC, displayed in `config.timeZone` |
+| `HH:MM:SS UTC` times | parsed as UTC, displayed in the viewer's local timezone |
 | `38° 19.080' N` positions | degrees + decimal minutes → decimal degrees |
 | `306° M` bearings | integer degrees, magnetic |
 | Irregular 17–33 s sampling | every rolling statistic uses a **time** window, never a row count |
