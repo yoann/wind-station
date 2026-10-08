@@ -76,7 +76,8 @@ you press "Back to live".
 Add `?replay` to the address to play the latest log back as though it were
 being written now — handy for checking the live view on a day the station is
 idle. Rows appear as a moving clock reaches them, and the pill goes Live →
-Delayed → Offline when the clock runs past the end of the file.
+Delayed → Offline when the clock runs past the end of the file. The layout is left
+exactly as live; only the footer line ends with `replay`.
 
 - `?replay` starts halfway through the file.
 - `?replay=14:30` starts at 14:30 in your local time, on the log's date.

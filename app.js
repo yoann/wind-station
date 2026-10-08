@@ -181,12 +181,6 @@ function boot() {
     el('banner').textContent =
       'Demo mode — showing the bundled sample file. Add an API key in config.js to go live.';
   }
-  if (REPLAY) {
-    el('banner').hidden = false;
-    el('banner').textContent =
-      `Replay mode \u2014 the latest log is played back as if live${
-        REPLAY.speed !== 1 ? ` at \u00D7${REPLAY.speed}` : ''}. Remove ?replay from the address for the real feed.`;
-  }
 
   load({ busy: true });
   setInterval(renderFreshness, 5000);
@@ -657,6 +651,9 @@ function renderFooter() {
     bits.push(`${state.station.lat.toFixed(4)}\u00B0, ${state.station.lon.toFixed(4)}\u00B0`);
   }
   bits.push(`times shown in ${viewerZone.replaceAll('_', ' ')}`);
+  // Said down here, in a line that is already there, so the replay keeps the
+  // live layout: a banner would push everything above the fold down.
+  if (replaying()) bits.push(`replay${REPLAY.speed !== 1 ? ` \u00D7${REPLAY.speed}` : ''}`);
   el('footer-meta').textContent = bits.join(' \u00B7 ');
 }
 
