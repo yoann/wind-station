@@ -37,10 +37,38 @@ const BUSY_DELAY = 180;
 const UNDER_WAY = 'Vessel under way \u2014 no station readings';
 const underWayOnly = () => !state.rows.length && state.excluded > 0;
 
+// `?replay[=HH:MM][&speed=N]` plays the latest log back as though it were being
+// written right now, so the live path — pill, freshness, polling, charts
+// growing — can be exercised on a day the station is not logging. The clock
+// starts at HH:MM (viewer's time, on the log's own date), or halfway through
+// the file, and runs at `speed` times real time. Rows past it stay hidden until
+// it reaches them. In the query string, not the hash: the unit picker rewrites
+// the hash.
+const REPLAY = (() => {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('replay')) return null;
+  const at = /^(\d{1,2}):(\d{2})$/.exec(q.get('replay'));
+  const speed = Number(q.get('speed'));
+  return {
+    at: at ? { h: Number(at[1]), m: Number(at[2]) } : null,
+    speed: speed > 0 ? speed : 1,
+    origin: null,         // { log, wall } in ms, pinned when the first file lands
+  };
+})();
+// Past days are history either way; replay only stands in for the live view.
+const replaying = () => REPLAY !== null && !state.viewingDay;
+
+/** The station's notion of now — the replay clock, when one is running. */
+function now() {
+  if (!REPLAY?.origin) return Date.now();
+  return REPLAY.origin.log + (Date.now() - REPLAY.origin.wall) * REPLAY.speed;
+}
+
 const state = {
   unit: CONFIG.defaultUnit,
   rows: [],
   rawText: '',
+  parsed: null,         // parseLog() of rawText, every row, before any filtering
   fileMeta: null,       // { id, name, modifiedTime }
   excluded: 0,          // rows dropped because the vessel was under way
   warmup: 0,            // rows dropped as the instrument's first of a session
@@ -153,6 +181,12 @@ function boot() {
     el('banner').textContent =
       'Demo mode — showing the bundled sample file. Add an API key in config.js to go live.';
   }
+  if (REPLAY) {
+    el('banner').hidden = false;
+    el('banner').textContent =
+      `Replay mode \u2014 the latest log is played back as if live${
+        REPLAY.speed !== 1 ? ` at \u00D7${REPLAY.speed}` : ''}. Remove ?replay from the address for the real feed.`;
+  }
 
   load({ busy: true });
   setInterval(renderFreshness, 5000);
@@ -181,6 +215,15 @@ function buildDialTicks() {
 async function load({ force = false, busy = false } = {}) {
   if (busy) beginBusy();
   try {
+    // A replay already holds the whole file; a poll only moves the clock on.
+    if (replaying() && state.parsed && !force) {
+      const before = state.rows.length + state.excluded + state.warmup;
+      sliceRows();
+      if (state.rows.length + state.excluded + state.warmup !== before) render();
+      else renderFreshness();
+      return;
+    }
+
     if (DEMO) {
       const path = state.viewingDay || DEMO_FILES[0].id;
       if (state.fileMeta?.id === path && !force) return;
@@ -234,7 +277,33 @@ async function load({ force = false, busy = false } = {}) {
 
 function ingest(bytes, meta) {
   state.rawText = decodeLog(bytes);
-  const { rows, station } = parseLog(state.rawText);
+  state.parsed = parseLog(state.rawText);
+  state.fileMeta = meta;
+  if (replaying() && !REPLAY.origin) {
+    REPLAY.origin = { log: replayStart(state.parsed.rows), wall: Date.now() };
+  }
+  sliceRows();
+  resolvePlaceFor(meta, state.station);
+}
+
+/** Where the replay clock starts: `?replay=HH:MM`, else halfway through the log. */
+function replayStart(rows) {
+  if (!rows.length) return Date.now();
+  if (REPLAY.at) {
+    const d = new Date(rows[0].t);
+    d.setHours(REPLAY.at.h, REPLAY.at.m, 0, 0);
+    return d.getTime();
+  }
+  return (rows[0].t + rows.at(-1).t) / 2;
+}
+
+/** Derive what is on screen from the parsed file — up to the replay clock, if any. */
+function sliceRows() {
+  let { rows, station } = state.parsed;
+  if (replaying()) {
+    const t = now();
+    rows = rows.filter((r) => r.t <= t);
+  }
   // The first reading of each logging session is the instrument starting up.
   // Dropped before the SOG filter so it is counted here and not absorbed there.
   const running = rows.filter((r) => !r.sessionStart);
@@ -245,8 +314,6 @@ function ingest(bytes, meta) {
   // mid-passage would otherwise pin the footer to wherever the boat was moving.
   const fixed = state.rows.find((r) => r.lat !== null && r.lon !== null);
   state.station = fixed ? { lat: fixed.lat, lon: fixed.lon } : station;
-  state.fileMeta = meta;
-  resolvePlaceFor(meta, state.station);
 }
 
 /**
@@ -293,8 +360,10 @@ function clearFile() {
 
 function scheduleNext() {
   clearTimeout(pollTimer);
-  if (DEMO || state.viewingDay) return;   // history is static; demo has nothing to poll
-  const base = CONFIG.pollSeconds * 1000;
+  // History is static; demo has nothing to poll unless a replay is moving it on.
+  if (state.viewingDay || (DEMO && !REPLAY)) return;
+  // A fast replay polls faster too, so each poll still covers pollSeconds of log.
+  const base = Math.max(1000, CONFIG.pollSeconds * 1000 / (replaying() ? REPLAY.speed : 1));
   const delay = state.backoff ? Math.min(base * state.backoff, 5 * MINUTE) : base;
   pollTimer = setTimeout(load, delay);
 }
@@ -505,7 +574,7 @@ function renderHero(s) {
     ? `${s.beaufort.label}, force ${s.beaufort.force}`
     : '';
 
-  const { state: fresh } = freshness(s.latest.t);
+  const { state: fresh } = freshness(s.latest.t, now());
   dial.classList.toggle('stale', fresh === 'offline');
 }
 
@@ -562,7 +631,7 @@ function renderFreshness() {
   }
 
   const last = state.rows.at(-1).t;
-  const { state: fresh, age } = freshness(last);
+  const { state: fresh, age } = freshness(last, now());
   if (fresh === 'live') {
     pill.classList.add('pill-live');
     text.textContent = `Live \u00B7 ${formatAge(age)}`;

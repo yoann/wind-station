@@ -71,6 +71,20 @@ Polling pauses when the tab is hidden and backs off exponentially on error
 (30 s → 60 s → … → 5 min cap). Selecting a past day pauses live polling until
 you press "Back to live".
 
+### Replay
+
+Add `?replay` to the address to play the latest log back as though it were
+being written now — handy for checking the live view on a day the station is
+idle. Rows appear as a moving clock reaches them, and the pill goes Live →
+Delayed → Offline when the clock runs past the end of the file.
+
+- `?replay` starts halfway through the file.
+- `?replay=14:30` starts at 14:30 in your local time, on the log's date.
+- `&speed=60` runs the clock 60× faster (polls speed up to match).
+
+It works in demo mode too, against the bundled sample. Past days in the picker
+are unaffected.
+
 ## Log format
 
 The parser handles these, all observed in real files:
