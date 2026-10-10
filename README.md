@@ -60,15 +60,22 @@ Two calls against `www.googleapis.com`, which sends CORS headers.
 (`drive.google.com/uc?export=download` does **not** and fails silently from a
 page — don't switch to it.)
 
-- Every 30 s: `files.list` for the folder, `orderBy=modifiedTime desc`,
-  `pageSize=1`. About 1 KB. Sorted by modification time, never filename, so
-  midnight rollover and re-uploads are handled.
-- Only when `modifiedTime` changes: `files/{id}?alt=media` for the CSV.
+- Once, when the page loads: `files.list` for the folder, `orderBy=modifiedTime
+  desc`, `pageSize=100`. The newest file is the live day; the rest fill the day
+  picker. Sorted by modification time, never filename, so re-uploads are handled.
+  After UTC midnight the folder is listed again, at most every 10 min, until a
+  new day's file appears.
+- Once per file shown: `files/{id}?alt=media` for the whole CSV.
+- Every 60 s on the live view: the same URL with `Range: bytes=N-`, starting 64
+  bytes before the end of what is held. Those 64 bytes must match, so a
+  rewritten file is told from a grown one and fetched whole; otherwise only the
+  new rows are appended.
 - Once per day file, ever: `files/{id}?alt=media` with `Range: bytes=0-2047`,
   to read that day's opening GPS fix for the picker label. See **Location**.
 
 Polling pauses when the tab is hidden and backs off exponentially on error
-(30 s → 60 s → … → 5 min cap). Selecting a past day pauses live polling until
+(60 s → 120 s → … → 5 min cap); a throttling answer from Drive — 429, or a 403
+whose reason is a rate or download limit — goes straight to the 5 min wait. Selecting a past day pauses live polling until
 you press "Back to live".
 
 ### Replay

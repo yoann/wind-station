@@ -15,7 +15,7 @@ export const CONFIG = {
   // a boat that moves between regattas labels itself correctly. Until the
   // lookup answers, nothing is shown rather than a guess.
   defaultUnit: 'kn',             // 'kn' | 'ms' | 'kmh'
-  pollSeconds: 30,
+  pollSeconds: 60,
 
   // Directions in the log are magnetic. Leave true unless the device is
   // reconfigured to output true bearings.

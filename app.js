@@ -8,7 +8,9 @@ import {
 import {
   paddedRange, directionRange, unwrapDeg, foldInto, normDeg, breakWraps,
 } from './lib/scale.js';
-import { fetchLatestMeta, listFiles, fetchFileBytes, fetchFileHead, describeError } from './lib/drive.js';
+import {
+  listFiles, fetchFileBytes, fetchFileFrom, fetchFileHead, describeError, DriveError,
+} from './lib/drive.js';
 import { reverseGeocode, localityOf } from './lib/geocode.js';
 import { renderRose, renderRoseLegend } from './lib/rose.js';
 import { Chart } from './lib/chart.js';
@@ -31,6 +33,13 @@ const DIR_CENTRE_MINUTES = 15;
 // Dimming the page for one of them reads as a flicker, which is worse than no
 // feedback at all, so the busy treatment waits this long before it shows.
 const BUSY_DELAY = 180;
+
+// Ceiling on the poll backoff multiplier; scheduleNext also caps the wait at 5 min.
+const MAX_BACKOFF = 10;
+
+// Bytes re-read before the end of the live file on each poll. They must match
+// what we already hold, which is how a rewritten file is told from a grown one.
+const TAIL_OVERLAP = 64;
 
 // Shown instead of "no data" when the file held readings but every one of them
 // was logged while the boat was moving — a real state, not an outage.
@@ -68,6 +77,7 @@ const state = {
   unit: CONFIG.defaultUnit,
   rows: [],
   rawText: '',
+  size: 0,              // bytes of the file held in rawText
   parsed: null,         // parseLog() of rawText, every row, before any filtering
   fileMeta: null,       // { id, name, modifiedTime }
   excluded: 0,          // rows dropped because the vessel was under way
@@ -85,6 +95,7 @@ const el = (id) => document.getElementById(id);
 let twsChart = null;
 let twdChart = null;
 let pollTimer = null;
+let inFlight = 0;
 let busyTimer = null;
 
 /* -- formatting ----------------------------------------------------------- */
@@ -172,8 +183,12 @@ function boot() {
     if (!scrubbing) clearReadouts();
   }, { passive: true });
 
+  // A tab left open in the background all day was polling Drive all day, which
+  // is how a single reader ends up throttled. Nobody is looking, so stop; catch
+  // up with one poll the moment the page is shown again.
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) load();
+    if (document.hidden) clearTimeout(pollTimer);
+    else if (!inFlight) load();
   });
 
   if (DEMO) {
@@ -208,6 +223,7 @@ function buildDialTicks() {
 
 async function load({ force = false, busy = false } = {}) {
   if (busy) beginBusy();
+  inFlight++;
   try {
     // A replay already holds the whole file; a poll only moves the clock on.
     if (replaying() && state.parsed && !force) {
@@ -232,35 +248,46 @@ async function load({ force = false, busy = false } = {}) {
       return;
     }
 
+    // The folder is listed when the page loads, not on every poll. The only
+    // later reason is a new day's file, which nothing else can reveal.
+    const listed = !state.fileIndex || (!state.viewingDay && rolloverDue());
+    if (listed) await listDays();
+
     let meta;
     if (state.viewingDay) {
-      meta = state.fileIndex?.find((f) => f.id === state.viewingDay) ?? null;
+      meta = state.fileIndex.find((f) => f.id === state.viewingDay) ?? null;
       if (!meta) throw new Error('day not found');
       if (!force && state.fileMeta?.id === meta.id) { render(); return; }
     } else {
-      meta = await fetchLatestMeta(CONFIG.folderId, CONFIG.apiKey);
+      meta = state.fileIndex[0] ?? null;
       if (!meta) { state.error = 'no files in the folder'; render(); return; }
-      // Cheap path: nothing changed, just refresh the clock.
-      if (!force && state.fileMeta?.id === meta.id
-          && state.fileMeta?.modifiedTime === meta.modifiedTime) {
+      // Same file as on screen: fetch only what has been appended since.
+      if (!force && state.fileMeta?.id === meta.id) {
+        const grew = await appendTail();
         state.error = null;
-        renderFreshness();
-        scheduleNext();
+        state.backoff = 0;
+        if (grew) render();
+        else renderFreshness();
+        if (listed) resolvePlaces(state.fileIndex);
         return;
       }
     }
 
-    const bytes = await fetchFileBytes(meta.id, CONFIG.apiKey);
-    ingest(bytes, meta);
+    ingest(await fetchFileBytes(meta.id, CONFIG.apiKey), meta);
     state.error = null;
     state.backoff = 0;
     render();
-    refreshDayIndex();
+    // After ingest, which caches the shown file's fix, so it is not probed too.
+    if (listed) resolvePlaces(state.fileIndex);
   } catch (err) {
     state.error = describeError(err);
-    state.backoff = Math.min(state.backoff ? state.backoff * 2 : 1, 10);
+    // Throttling only lifts if we go quiet, so skip straight to the longest wait.
+    state.backoff = err instanceof DriveError && err.throttled
+      ? MAX_BACKOFF
+      : Math.min(state.backoff ? state.backoff * 2 : 1, MAX_BACKOFF);
     render();
   } finally {
+    inFlight--;
     // Before scheduleNext, and before this function returns to whatever paints
     // next: leaving the flag up would repaint the pill as 'Loading' on data
     // that has already landed.
@@ -271,6 +298,7 @@ async function load({ force = false, busy = false } = {}) {
 
 function ingest(bytes, meta) {
   state.rawText = decodeLog(bytes);
+  state.size = bytes.byteLength;
   state.parsed = parseLog(state.rawText);
   state.fileMeta = meta;
   if (replaying() && !REPLAY.origin) {
@@ -355,11 +383,56 @@ function clearFile() {
 function scheduleNext() {
   clearTimeout(pollTimer);
   // History is static; demo has nothing to poll unless a replay is moving it on.
-  if (state.viewingDay || (DEMO && !REPLAY)) return;
+  // A hidden tab waits for visibilitychange instead.
+  if (state.viewingDay || (DEMO && !REPLAY) || document.hidden) return;
   // A fast replay polls faster too, so each poll still covers pollSeconds of log.
   const base = Math.max(1000, CONFIG.pollSeconds * 1000 / (replaying() ? REPLAY.speed : 1));
   const delay = state.backoff ? Math.min(base * state.backoff, 5 * MINUTE) : base;
-  pollTimer = setTimeout(load, delay);
+  // Jitter, so readers who opened the page together do not poll in lockstep.
+  pollTimer = setTimeout(load, delay * (0.9 + Math.random() * 0.2));
+}
+
+/**
+ * Bring the live file up to date with a Range request from just before the end
+ * of what we hold. The log only ever grows, so the overlap should come back
+ * byte for byte; if it does not, the file was rewritten and is fetched whole.
+ * Returns whether anything changed.
+ */
+async function appendTail() {
+  const meta = state.fileMeta;
+  const from = Math.max(0, state.size - TAIL_OVERLAP);
+  const got = await fetchFileFrom(meta.id, CONFIG.apiKey, from);
+  if (got?.partial) {
+    // windows-1252 is one byte per character, so text offsets are byte offsets.
+    const text = decodeLog(got.bytes);
+    const seam = state.rawText.slice(from);
+    if (text.startsWith(seam)) {
+      if (text.length === seam.length) return false;
+      state.rawText += text.slice(seam.length);
+      state.size = from + got.bytes.byteLength;
+      state.parsed = parseLog(state.rawText);
+      sliceRows();
+      return true;
+    }
+  }
+  if (got && !got.partial) ingest(got.bytes, meta);
+  else ingest(await fetchFileBytes(meta.id, CONFIG.apiKey), meta);
+  return true;
+}
+
+/**
+ * Whether to list the folder again for a new day's file: only once the file on
+ * screen is from an earlier day (UTC, like the log), and then at most every 10
+ * minutes, so a day the boat does not log costs a handful of listings, not one
+ * per poll.
+ */
+function rolloverDue() {
+  const d = dateFromFilename(state.fileMeta?.name ?? '');
+  if (!d) return false;
+  const t = new Date();
+  const today = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
+  return Date.UTC(d.y, d.m - 1, d.d) < today
+    && Date.now() - state.indexFetchedAt >= 10 * MINUTE;
 }
 
 function populateDayOptions(files) {
@@ -389,16 +462,12 @@ function repaintDayOptions() {
   if (state.dayFiles.length) populateDayOptions(state.dayFiles);
 }
 
-async function refreshDayIndex() {
-  if (DEMO) return;
-  if (state.indexFetchedAt && Date.now() - state.indexFetchedAt < 10 * MINUTE) return;
-  try {
-    const files = await listFiles(CONFIG.folderId, CONFIG.apiKey, 100);
-    state.fileIndex = files;
-    state.indexFetchedAt = Date.now();
-    populateDayOptions(files);
-    resolvePlaces(files);
-  } catch { /* the picker is optional; never let it break the live view */ }
+/** One listing serves both the live view (newest first) and the day picker. */
+async function listDays() {
+  const files = await listFiles(CONFIG.folderId, CONFIG.apiKey, 100);
+  state.fileIndex = files;
+  state.indexFetchedAt = Date.now();
+  populateDayOptions(files);
 }
 
 function downloadCsv() {

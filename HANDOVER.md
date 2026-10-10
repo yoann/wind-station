@@ -205,10 +205,8 @@ A full 24 h day is expected to be ≈2,880 rows and ≈290 KB.
    restriction), fill `config.js`, deploy to Cloudflare Pages / Netlify /
    GitHub Pages. Then confirm against the real folder: does `files.list` return
    what's expected, does the poll loop pick up a mid-day update?
-3. **`Range` requests for the file tail.** Once a day's file is parsed, request
-   only bytes past the last known offset and append, instead of re-downloading
-   ~290 KB on every change. Drive's `alt=media` honours `Range`.
-   Acceptance: a tab open for an hour transfers far less than 60 × file size.
+3. ~~**`Range` requests for the file tail.**~~ Done: polls fetch only the tail,
+   once a minute, and the folder is listed at load (see README, How it fetches).
 4. **Mobile pass on a real phone in sunlight.** The layout is mobile-first but
    has only been checked at desktop widths.
 5. **Long-run soak.** Leave it open across a device power-cycle and confirm the

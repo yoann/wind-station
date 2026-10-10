@@ -76,6 +76,19 @@ const GAZETTEER = [
 ];
 const geocodeCalls = [];
 const rangeRequests = [];
+// The live poll: how often the folder is listed, which tail ranges were asked
+// for, and a way to grow or rewrite the newest file between polls.
+let listCalls = 0;
+const tailRequests = [];
+const liveFile = { grown: '', replaced: null };
+const LIVE_ID = 'drv-SsLog-19-08-2026.csv';
+const contentOf = (id, name) => {
+  if (id === LIVE_ID) {
+    if (liveFile.replaced) return Buffer.from(liveFile.replaced, 'latin1');
+    return Buffer.concat([readFileSync(`${APP}/sample/${name}`), Buffer.from(liveFile.grown, 'latin1')]);
+  }
+  return SYNTHETIC[id] ? Buffer.from(SYNTHETIC[id], 'latin1') : readFileSync(`${APP}/sample/${name}`);
+};
 // Held downloads: the busy treatment only shows after BUSY_DELAY, so a stub that
 // answers instantly can prove it stays hidden but never that it appears.
 let downloadDelayMs = 0;
@@ -93,6 +106,7 @@ window.fetch = async (url, options) => {
 
   // files.list — honours pageSize, already sorted newest-first
   if (u.pathname === '/drive/v3/files') {
+    listCalls++;
     const pageSize = Number(u.searchParams.get('pageSize') ?? 1);
     const files = DRIVE_FILES.slice(0, pageSize);
     return { ok: true, json: async () => ({ files }) };
@@ -105,9 +119,19 @@ window.fetch = async (url, options) => {
   const meta = DRIVE_FILES.find((f) => f.id === id);
   if (meta && u.searchParams.get('alt') === 'media') {
     if (downloadDelayMs && !range) await new Promise((r) => setTimeout(r, downloadDelayMs));
-    // Drive honours Range; serving the whole file is a superset the parser
-    // handles, and the header itself is asserted below.
-    return SYNTHETIC[id] ? bodyOf(Buffer.from(SYNTHETIC[id], 'latin1')) : sampleBody(meta.name);
+    const buf = contentOf(id, meta.name);
+    // An open-ended range is the live tail, answered the way Drive does: 206
+    // with the rest of the file, or 416 once the file is shorter than the start.
+    const tail = /^bytes=(\d+)-$/.exec(range ?? '');
+    if (tail) {
+      const start = Number(tail[1]);
+      tailRequests.push(start);
+      if (start >= buf.length) return { ok: false, status: 416, json: async () => ({}) };
+      return { ...bodyOf(buf.subarray(start)), status: 206 };
+    }
+    // A bounded range is a picker probe. Serving the whole file is a superset
+    // the parser handles, and the header itself is asserted below.
+    return bodyOf(buf);
   }
 
   // Demo mode still works if the API key is ever cleared from config.js
@@ -425,6 +449,49 @@ forget();
 $('chart-twd').dispatchEvent(new window.Event('pointerup', { bubbles: true }));
 window.dispatchEvent(new window.Event('scroll'));
 check('once the finger lifts, scrolling dismisses again', live.every(cleared));
+
+// Back on the live view, a poll must not list the folder again: it asks for
+// the bytes past what it holds, and appends them.
+// Back to knots, which the expected readings below are written in.
+$('unit-select').value = 'kn';
+$('unit-select').dispatchEvent(new window.Event('change'));
+$('back-to-live').click();
+await waitFor(() => $('dial-speed').textContent === '8.7');
+const poll = async () => {
+  window.document.dispatchEvent(new window.Event('visibilitychange'));
+  await new Promise((r) => setTimeout(r, 100));
+};
+const listsBefore = listCalls;
+const LIVE_SIZE = readFileSync(`${APP}/sample/SsLog-19-08-2026.csv`).length;
+liveFile.grown = "19/08/2026, 12:03:31 UTC, 38\xB0 19.076' N, 026\xB0 41.693' E, 00.2, 355\xB0 M, 12.3, 030\xB0 Port, 327\xB0 M, , \r\n";
+await poll();
+console.log('\nPolling the live file:');
+check('listed once, when the page loaded', listsBefore === 1, `${listsBefore} listings`);
+check('a poll does not list the folder', listCalls === listsBefore, `${listCalls - listsBefore} extra`);
+check('a poll asks only for the end of the file', tailRequests.at(-1) === LIVE_SIZE - 64,
+  `range from ${tailRequests.at(-1)} of ${LIVE_SIZE}`);
+check('the appended reading reaches the dial', $('dial-speed').textContent === '12.3',
+  `got "${$('dial-speed').textContent}"`);
+
+const tailsBefore = tailRequests.length;
+await poll();
+check('a poll with nothing new re-reads only the overlap',
+  tailRequests.length === tailsBefore + 1 && tailRequests.at(-1) === LIVE_SIZE + liveFile.grown.length - 64,
+  `range from ${tailRequests.at(-1)}`);
+check('…and changes nothing', $('dial-speed').textContent === '12.3');
+
+// Rewritten shorter than what we hold: Drive answers 416, so fetch it whole.
+liveFile.replaced = syntheticDay('19/08/2026', "38\xB0 19.080' N", "026\xB0 41.698' E");
+await poll();
+check('a file rewritten shorter is fetched whole', $('dial-speed').textContent === '9.1',
+  `got "${$('dial-speed').textContent}"`);
+
+// Rewritten in place, same length: only the overlap check can notice.
+liveFile.replaced = liveFile.replaced.replace('09.1, 026', '07.7, 026');
+await poll();
+check('a file whose overlap no longer matches is fetched whole',
+  $('dial-speed').textContent === '7.7', `got "${$('dial-speed').textContent}"`);
+check('still no extra listing', listCalls === listsBefore, `${listCalls - listsBefore} extra`);
 
 console.log(fails.length ? `\n${fails.length} failing\n` : '\nall passing\n');
 process.exit(fails.length ? 1 : 0);

@@ -28,22 +28,22 @@ The folder must remain shared as "anyone with the link". Use `www.googleapis.com
 CORS headers. **Do not** use `drive.google.com/uc?export=download` — no CORS, the fetch fails
 silently from a page.
 
-**Poll (every 30 s, ~1 KB):**
+**List (once, when the page loads):**
 
 ```
 GET https://www.googleapis.com/drive/v3/files
   ?q='12Sn5_2YPEmH2ZzxTXy9Fcy8M6MZGi8Qr'+in+parents+and+trashed=false
   &orderBy=modifiedTime desc
-  &pageSize=1
+  &pageSize=100
   &fields=files(id,name,modifiedTime,size)
   &key=API_KEY
 ```
 
-Take `files[0]`. Sort by `modifiedTime`, never by filename — this survives midnight rollover,
+Take `files[0]` as the live day; the rest fill the day picker. Sort by `modifiedTime`, never by filename — this survives midnight rollover,
 re-uploads, and backfilled days. Filename (`SsLog-19-08-2026.csv`, dd-mm-yyyy) is a display
 fallback only.
 
-**Download (only when `modifiedTime` differs from last seen):**
+**Download (once per file shown; then every 60 s with `Range: bytes=N-` for the tail):**
 
 ```
 GET https://www.googleapis.com/drive/v3/files/{fileId}?alt=media&key=API_KEY
@@ -56,11 +56,14 @@ HTTP-referrer restriction for the site's domain. Keep nothing else in that folde
 
 ### Polling behaviour
 
-- 30 s interval. Pause on `document.visibilitychange` → hidden; resume and poll immediately on
+- 60 s interval. Pause on `document.visibilitychange` → hidden; resume and poll immediately on
   return.
-- Exponential backoff on error: 30 s → 60 s → 120 s, cap 5 min. Never hammer.
-- v2 optimisation: once the file is parsed, send `Range: bytes=N-` on subsequent media fetches
-  and append only the tail. Skip for v1 — a full day is ~290 KB.
+- Exponential backoff on error: 60 s → 120 s → 240 s, cap 5 min. Never hammer. Drive
+  throttling (429, or 403 with a rate/download-limit reason) goes straight to the cap.
+- Each poll sends `Range: bytes=N-` from 64 bytes before the end of what is held, and appends
+  the rest. The 64 overlapping bytes must match; if not, or on 416, the file was rewritten and
+  is fetched whole. The folder is not re-listed per poll — only after UTC midnight, at most
+  every 10 min, to find the new day's file.
 
 ---
 
